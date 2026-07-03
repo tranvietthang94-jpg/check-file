@@ -12,9 +12,11 @@ interface DisksState {
   removeDestination: (diskId: string) => void;
   setSourceLabel: (diskId: string, label: string) => void;
   setDestinationLabel: (diskId: string, label: string) => void;
+  setSourcePath: (diskId: string, path: string) => void;
+  setDestinationPath: (diskId: string, path: string) => void;
 }
 
-export const useDisksStore = create<DisksState>((set) => ({
+export const useDisksStore = create<DisksState>((set, get) => ({
   disks: [],
   sources: [],
   destinations: [],
@@ -22,18 +24,25 @@ export const useDisksStore = create<DisksState>((set) => ({
   setDisks: (disks) => set({ disks }),
 
   addSource: (diskId) =>
-    set((state) =>
-      state.sources.some((s) => s.diskId === diskId)
-        ? state
-        : { sources: [...state.sources, { diskId, label: "" }] },
-    ),
+    set((state) => {
+      if (state.sources.some((s) => s.diskId === diskId)) return state;
+      const disk = get().disks.find((d) => d.id === diskId);
+      return {
+        sources: [...state.sources, { diskId, label: "", path: disk?.mountPoint ?? "" }],
+      };
+    }),
 
   addDestination: (diskId) =>
-    set((state) =>
-      state.destinations.some((d) => d.diskId === diskId)
-        ? state
-        : { destinations: [...state.destinations, { diskId, label: "" }] },
-    ),
+    set((state) => {
+      if (state.destinations.some((d) => d.diskId === diskId)) return state;
+      const disk = get().disks.find((d) => d.id === diskId);
+      return {
+        destinations: [
+          ...state.destinations,
+          { diskId, label: "", path: disk?.mountPoint ?? "" },
+        ],
+      };
+    }),
 
   removeSource: (diskId) =>
     set((state) => ({
@@ -54,6 +63,18 @@ export const useDisksStore = create<DisksState>((set) => ({
     set((state) => ({
       destinations: state.destinations.map((d) =>
         d.diskId === diskId ? { ...d, label } : d,
+      ),
+    })),
+
+  setSourcePath: (diskId, path) =>
+    set((state) => ({
+      sources: state.sources.map((s) => (s.diskId === diskId ? { ...s, path } : s)),
+    })),
+
+  setDestinationPath: (diskId, path) =>
+    set((state) => ({
+      destinations: state.destinations.map((d) =>
+        d.diskId === diskId ? { ...d, path } : d,
       ),
     })),
 }));

@@ -6,6 +6,7 @@ interface EndpointListProps {
   disks: DiskInfo[];
   onRemove: (diskId: string) => void;
   onLabelChange: (diskId: string, label: string) => void;
+  onPathChange: (diskId: string, path: string) => void;
 }
 
 export function EndpointList({
@@ -14,6 +15,7 @@ export function EndpointList({
   disks,
   onRemove,
   onLabelChange,
+  onPathChange,
 }: EndpointListProps) {
   return (
     <section className="flex flex-col gap-2">
@@ -42,7 +44,8 @@ export function EndpointList({
                   value={endpoint.label}
                   onChange={(e) => onLabelChange(endpoint.diskId, e.currentTarget.value)}
                   placeholder="Label…"
-                  className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
+                  autoComplete="off"
+                  className="w-24 shrink-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
                 />
                 <button
                   type="button"
@@ -51,6 +54,18 @@ export function EndpointList({
                 >
                   Remove
                 </button>
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                  Folder path
+                </span>
+                <input
+                  value={endpoint.path}
+                  onChange={(e) => onPathChange(endpoint.diskId, e.currentTarget.value)}
+                  placeholder="Full folder path…"
+                  autoComplete="off"
+                  className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+                />
               </div>
             </li>
           );

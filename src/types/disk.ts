@@ -11,4 +11,5 @@ export interface DiskInfo {
 export interface Endpoint {
   diskId: string;
   label: string;
+  path: string;
 }
