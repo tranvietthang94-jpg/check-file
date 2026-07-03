@@ -88,6 +88,8 @@ function App() {
         bytesPerSec: 0,
         failedFiles: [],
         verifiedFiles: [],
+        skippedFiles: [],
+        renamedFiles: [],
       });
     }
 

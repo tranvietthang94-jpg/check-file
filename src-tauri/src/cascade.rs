@@ -219,42 +219,40 @@ mod tests {
         );
     }
 
+    fn test_outcome(cancelled: bool, files_copied: u64, failed_files: Vec<FailedFile>) -> CopyOutcome {
+        CopyOutcome {
+            cancelled,
+            files_copied,
+            bytes_copied: 0,
+            failed_files,
+            verified_files: Vec::new(),
+            skipped_files: Vec::new(),
+            renamed_files: Vec::new(),
+        }
+    }
+
     #[test]
     fn cascade_continues_after_a_clean_hop() {
-        let outcome = CopyOutcome {
-            cancelled: false,
-            files_copied: 3,
-            bytes_copied: 100,
-            failed_files: Vec::new(),
-            verified_files: Vec::new(),
-        };
+        let outcome = test_outcome(false, 3, Vec::new());
         assert!(should_cascade_continue(&outcome));
     }
 
     #[test]
     fn cascade_stops_if_hop_one_was_cancelled() {
-        let outcome = CopyOutcome {
-            cancelled: true,
-            files_copied: 0,
-            bytes_copied: 0,
-            failed_files: Vec::new(),
-            verified_files: Vec::new(),
-        };
+        let outcome = test_outcome(true, 0, Vec::new());
         assert!(!should_cascade_continue(&outcome));
     }
 
     #[test]
     fn cascade_stops_if_hop_one_had_failures() {
-        let outcome = CopyOutcome {
-            cancelled: false,
-            files_copied: 2,
-            bytes_copied: 50,
-            failed_files: vec![FailedFile {
+        let outcome = test_outcome(
+            false,
+            2,
+            vec![FailedFile {
                 path: "bad.mov".to_string(),
                 message: "checksum mismatch".to_string(),
             }],
-            verified_files: Vec::new(),
-        };
+        );
         assert!(
             !should_cascade_continue(&outcome),
             "relaying from a primary with a known-bad file would propagate the corruption"

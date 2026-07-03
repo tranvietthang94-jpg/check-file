@@ -2,6 +2,7 @@ mod cascade;
 mod checksum;
 mod commands;
 mod copy_engine;
+mod dedup;
 mod disks;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -5,12 +5,13 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use walkdir::WalkDir;
 
 use crate::checksum::{self, ChecksumAlgorithm, StreamingHasher};
+use crate::dedup::{self, DuplicateAction};
 
 /// How thoroughly a transfer is checked for integrity.
 /// - `Transfer`: no hashing, relies on the OS copy completing without an I/O error.
@@ -66,6 +67,24 @@ pub struct VerifiedFile {
     pub algorithm: ChecksumAlgorithm,
 }
 
+/// A file that already existed at the destination with the same name, size,
+/// and modified time -- treated as already offloaded and not copied again.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedFile {
+    pub path: String,
+}
+
+/// A file that collided on name with a different file already at the
+/// destination (different size or modified time), so it was copied under a
+/// new name instead of overwriting.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamedFile {
+    pub original_path: String,
+    pub renamed_to: String,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanPayload {
@@ -82,6 +101,8 @@ pub struct CompletePayload {
     pub bytes_copied: u64,
     pub failed_files: Vec<FailedFile>,
     pub verified_files: Vec<VerifiedFile>,
+    pub skipped_files: Vec<SkippedFile>,
+    pub renamed_files: Vec<RenamedFile>,
 }
 
 #[derive(Serialize, Clone)]
@@ -99,6 +120,8 @@ pub struct CopyOutcome {
     pub bytes_copied: u64,
     pub failed_files: Vec<FailedFile>,
     pub verified_files: Vec<VerifiedFile>,
+    pub skipped_files: Vec<SkippedFile>,
+    pub renamed_files: Vec<RenamedFile>,
 }
 
 /// Destination for scan/progress notifications. Kept separate from Tauri so
@@ -141,6 +164,7 @@ struct FileEntry {
     absolute: PathBuf,
     relative: PathBuf,
     size: u64,
+    modified: SystemTime,
 }
 
 /// Emits throttled progress notifications so the UI isn't flooded on fast local copies.
@@ -206,12 +230,13 @@ fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
         ));
     }
     if source.is_file() {
-        let size = fs::metadata(source)?.len();
+        let meta = fs::metadata(source)?;
         let relative = PathBuf::from(source.file_name().unwrap_or_default());
         return Ok(vec![FileEntry {
             absolute: source.to_path_buf(),
             relative,
-            size,
+            size: meta.len(),
+            modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
         }]);
     }
 
@@ -223,11 +248,17 @@ fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
                 .strip_prefix(source)
                 .unwrap_or(&absolute)
                 .to_path_buf();
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let meta = entry.metadata().ok();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
             entries.push(FileEntry {
                 absolute,
                 relative,
                 size,
+                modified,
             });
         }
     }
@@ -256,9 +287,10 @@ fn copy_file_chunked(
     relative_display: &str,
     checksum_algorithm: ChecksumAlgorithm,
     compute_hash: bool,
+    source_modified: SystemTime,
 ) -> std::io::Result<CopyFileOutcome> {
     let mut src_file = fs::File::open(src)?;
-    let mut dst_file = fs::File::create(dst)?;
+    let dst_file = fs::File::create(dst)?;
     let mut hasher = compute_hash.then(|| StreamingHasher::new(checksum_algorithm));
 
     loop {
@@ -271,12 +303,19 @@ fn copy_file_chunked(
         if n == 0 {
             break;
         }
-        dst_file.write_all(&buffer[..n])?;
+        (&dst_file).write_all(&buffer[..n])?;
         if let Some(h) = hasher.as_mut() {
             h.update(&buffer[..n]);
         }
         tracker.add_bytes(n as u64, relative_display);
     }
+
+    // Mirror the source's modified time onto the destination. Without this,
+    // every destination file gets "now" as its mtime, which would make
+    // duplicate detection (name + size + mtime) misfire as a rename on any
+    // second offload of the same card instead of recognizing it as already
+    // copied.
+    let _ = dst_file.set_modified(source_modified);
 
     Ok(CopyFileOutcome::Completed {
         source_hash: hasher.map(|h| h.finalize_hex()),
@@ -307,6 +346,8 @@ pub fn run_copy_core(
                     message: err.to_string(),
                 }],
                 verified_files: Vec::new(),
+                skipped_files: Vec::new(),
+                renamed_files: Vec::new(),
             };
         }
     };
@@ -320,6 +361,8 @@ pub fn run_copy_core(
     let mut buffer = vec![0u8; CHUNK_SIZE];
     let mut failed_files = Vec::new();
     let mut verified_files = Vec::new();
+    let mut skipped_files = Vec::new();
+    let mut renamed_files = Vec::new();
     let mut cancelled = false;
 
     for entry in &entries {
@@ -328,7 +371,7 @@ pub fn run_copy_core(
             break;
         }
 
-        let dest_path = destination.join(&entry.relative);
+        let mut dest_path = destination.join(&entry.relative);
         if let Some(parent) = dest_path.parent() {
             if let Err(err) = fs::create_dir_all(parent) {
                 failed_files.push(FailedFile {
@@ -340,15 +383,55 @@ pub fn run_copy_core(
         }
 
         let relative_display = entry.relative.display().to_string();
+        // Tracks the path actually written to, which diverges from
+        // `relative_display` after a rename -- everything downstream
+        // (copying, verification, error reporting) must refer to this one
+        // so a renamed file is never reported under its original name.
+        let mut copy_display = relative_display.clone();
+
+        match dedup::resolve_duplicate(&dest_path, entry.size, entry.modified) {
+            Ok(DuplicateAction::Copy) => {}
+            Ok(DuplicateAction::Skip) => {
+                tracker.add_bytes(entry.size, &relative_display);
+                tracker.finish_file();
+                skipped_files.push(SkippedFile {
+                    path: relative_display,
+                });
+                continue;
+            }
+            Ok(DuplicateAction::Rename(new_path)) => {
+                copy_display = entry
+                    .relative
+                    .parent()
+                    .unwrap_or_else(|| Path::new(""))
+                    .join(new_path.file_name().unwrap_or_default())
+                    .display()
+                    .to_string();
+                renamed_files.push(RenamedFile {
+                    original_path: relative_display,
+                    renamed_to: copy_display.clone(),
+                });
+                dest_path = new_path;
+            }
+            Err(err) => {
+                failed_files.push(FailedFile {
+                    path: relative_display,
+                    message: format!("could not check for duplicates: {err}"),
+                });
+                continue;
+            }
+        }
+
         match copy_file_chunked(
             &entry.absolute,
             &dest_path,
             &mut buffer,
             cancel_flag,
             &mut tracker,
-            &relative_display,
+            &copy_display,
             checksum_algorithm,
             compute_hash,
+            entry.modified,
         ) {
             Ok(CopyFileOutcome::Completed { source_hash }) => {
                 tracker.finish_file();
@@ -356,18 +439,18 @@ pub fn run_copy_core(
                     if verification_mode == VerificationMode::SourceAndDestination {
                         match checksum::verify_file_hash(&dest_path, &hash, checksum_algorithm) {
                             Ok(true) => verified_files.push(VerifiedFile {
-                                path: relative_display,
+                                path: copy_display,
                                 checksum: hash,
                                 algorithm: checksum_algorithm,
                             }),
                             Ok(false) => failed_files.push(FailedFile {
-                                path: relative_display,
+                                path: copy_display,
                                 message:
                                     "checksum mismatch: source and destination differ after copy"
                                         .to_string(),
                             }),
                             Err(err) => failed_files.push(FailedFile {
-                                path: relative_display,
+                                path: copy_display,
                                 message: format!(
                                     "could not re-read destination for verification: {err}"
                                 ),
@@ -376,7 +459,7 @@ pub fn run_copy_core(
                     } else {
                         // Source-only mode: nothing to compare against yet, just record it.
                         verified_files.push(VerifiedFile {
-                            path: relative_display,
+                            path: copy_display,
                             checksum: hash,
                             algorithm: checksum_algorithm,
                         });
@@ -388,7 +471,7 @@ pub fn run_copy_core(
                 break;
             }
             Err(err) => failed_files.push(FailedFile {
-                path: relative_display,
+                path: copy_display,
                 message: err.to_string(),
             }),
         }
@@ -404,6 +487,8 @@ pub fn run_copy_core(
         bytes_copied: tracker.bytes_copied,
         failed_files,
         verified_files,
+        skipped_files,
+        renamed_files,
     }
 }
 
@@ -473,6 +558,8 @@ pub fn run_copy_job<R: Runtime>(
                 bytes_copied: outcome.bytes_copied,
                 failed_files: outcome.failed_files.clone(),
                 verified_files: outcome.verified_files.clone(),
+                skipped_files: outcome.skipped_files.clone(),
+                renamed_files: outcome.renamed_files.clone(),
             },
         );
     }
@@ -677,5 +764,120 @@ mod tests {
         let dest_hash =
             checksum::hash_file(&dst_dir.path().join("a.txt"), ChecksumAlgorithm::Md5).unwrap();
         assert_eq!(outcome.verified_files[0].checksum, dest_hash);
+    }
+
+    #[test]
+    fn re_running_the_same_transfer_skips_already_offloaded_files() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("clip.mp4"), b"camera footage").unwrap();
+
+        let run = |cancel: &AtomicBool| {
+            run_copy_core(
+                &NoopSink,
+                "job-dedup".to_string(),
+                src_dir.path(),
+                dst_dir.path(),
+                cancel,
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+            )
+        };
+
+        let first = run(&AtomicBool::new(false));
+        assert_eq!(first.files_copied, 1);
+        assert!(first.skipped_files.is_empty());
+
+        // Re-offloading the same card to the same destination (a real DIT
+        // workflow: verifying a card offloaded correctly before formatting
+        // it) must not re-copy or corrupt what's already there.
+        let second = run(&AtomicBool::new(false));
+        assert_eq!(second.skipped_files.len(), 1);
+        assert_eq!(second.skipped_files[0].path, "clip.mp4");
+        assert_eq!(
+            fs::read(dst_dir.path().join("clip.mp4")).unwrap(),
+            b"camera footage"
+        );
+    }
+
+    #[test]
+    fn name_collision_with_different_content_is_renamed_not_overwritten() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+
+        // Two different cards that both start clip numbering at C0001.mp4.
+        fs::write(src_dir.path().join("C0001.mp4"), b"card A footage").unwrap();
+        fs::write(dst_dir.path().join("C0001.mp4"), b"card B footage, already offloaded").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-collision".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert!(outcome.skipped_files.is_empty());
+        assert_eq!(outcome.renamed_files.len(), 1);
+        assert_eq!(outcome.renamed_files[0].original_path, "C0001.mp4");
+        assert_eq!(outcome.renamed_files[0].renamed_to, "C0001 2.mp4");
+
+        // The pre-existing file must survive untouched, and the new one
+        // lands under the renamed path with the new card's actual content.
+        assert_eq!(
+            fs::read(dst_dir.path().join("C0001.mp4")).unwrap(),
+            b"card B footage, already offloaded"
+        );
+        assert_eq!(
+            fs::read(dst_dir.path().join("C0001 2.mp4")).unwrap(),
+            b"card A footage"
+        );
+    }
+
+    #[test]
+    fn copy_preserves_the_source_modified_time() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+
+        let src_path = src_dir.path().join("clip.mp4");
+        fs::write(&src_path, b"camera footage").unwrap();
+
+        // Simulate camera footage recorded years ago, not just-now test
+        // fixture data -- a same-second mtime wouldn't be able to tell
+        // "preserved the source's time" apart from "defaulted to now".
+        let years_ago = SystemTime::now() - std::time::Duration::from_secs(5 * 365 * 24 * 3600);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&src_path)
+            .unwrap()
+            .set_modified(years_ago)
+            .unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        run_copy_core(
+            &NoopSink,
+            "job-mtime".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+        );
+
+        let dest_modified = fs::metadata(dst_dir.path().join("clip.mp4"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let source_modified = fs::metadata(&src_path).unwrap().modified().unwrap();
+        assert_eq!(
+            dest_modified, source_modified,
+            "destination mtime must mirror the source's, or a second offload of the \
+             same card would misdetect every file as a rename-worthy collision instead \
+             of an already-copied duplicate"
+        );
     }
 }

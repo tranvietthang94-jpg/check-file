@@ -14,6 +14,15 @@ export interface VerifiedFile {
   algorithm: ChecksumAlgorithm;
 }
 
+export interface SkippedFile {
+  path: string;
+}
+
+export interface RenamedFile {
+  originalPath: string;
+  renamedTo: string;
+}
+
 export interface TransferJob {
   id: string;
   groupId: string;
@@ -34,6 +43,8 @@ export interface TransferJob {
   bytesPerSec: number;
   failedFiles: FailedFile[];
   verifiedFiles: VerifiedFile[];
+  skippedFiles: SkippedFile[];
+  renamedFiles: RenamedFile[];
 }
 
 export interface ScanEventPayload {
@@ -58,6 +69,8 @@ export interface CompleteEventPayload {
   bytesCopied: number;
   failedFiles: FailedFile[];
   verifiedFiles: VerifiedFile[];
+  skippedFiles: SkippedFile[];
+  renamedFiles: RenamedFile[];
 }
 
 export interface CancelledEventPayload {

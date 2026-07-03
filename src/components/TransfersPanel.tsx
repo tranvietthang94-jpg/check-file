@@ -75,6 +75,22 @@ function JobRow({ job, onCancel }: { job: TransferJob; onCancel: (jobId: string)
           {job.verifiedFiles[0].algorithm.toUpperCase()})
         </p>
       )}
+      {job.skippedFiles.length > 0 && (
+        <p
+          className="text-xs text-neutral-400"
+          title={job.skippedFiles.map((f) => f.path).join(", ")}
+        >
+          {job.skippedFiles.length} file(s) skipped (already offloaded)
+        </p>
+      )}
+      {job.renamedFiles.length > 0 && (
+        <p
+          className="text-xs text-yellow-500"
+          title={job.renamedFiles.map((f) => `${f.originalPath} → ${f.renamedTo}`).join(", ")}
+        >
+          {job.renamedFiles.length} file(s) renamed (name already used by a different file)
+        </p>
+      )}
       {job.failedFiles.length > 0 && (
         <p className="text-xs text-red-400" title={job.failedFiles[0].message}>
           {job.failedFiles.length} file(s) failed — {job.failedFiles[0].message}
