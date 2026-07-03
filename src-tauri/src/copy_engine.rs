@@ -42,6 +42,18 @@ pub const CANCELLED_EVENT: &str = "copy-cancelled";
 
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB
 const PROGRESS_THROTTLE: std::time::Duration = std::time::Duration::from_millis(200);
+/// A file gets this many attempts total (1 initial + retries) before it's
+/// reported as failed -- a transient read/write error (e.g. a flaky card
+/// reader) often clears up if the source is simply read again.
+const MAX_COPY_ATTEMPTS: u32 = 3;
+const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Pure decision extracted for testability -- never retries a cancelled
+/// copy (the user asked it to stop, retrying would ignore that) or once
+/// the attempt budget is spent.
+fn should_retry_copy(attempt: u32, cancelled: bool) -> bool {
+    attempt < MAX_COPY_ATTEMPTS && !cancelled
+}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -137,16 +149,19 @@ pub trait ProgressSink {
     fn on_progress(&self, payload: ProgressPayload);
 }
 
-/// Tracks cancellation flags for in-flight copy jobs, keyed by job id.
+/// Tracks cancellation flags for in-flight copy jobs, keyed by job id, and
+/// keeps the system awake for as long as any of them are running.
 #[derive(Default)]
 pub struct JobRegistry {
     cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    sleep_guard: crate::power::SleepGuard,
 }
 
 impl JobRegistry {
     pub fn register(&self, job_id: String) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags.lock().unwrap().insert(job_id, flag.clone());
+        self.sleep_guard.job_started();
         flag
     }
 
@@ -162,7 +177,15 @@ impl JobRegistry {
     }
 
     pub fn remove(&self, job_id: &str) {
-        self.cancel_flags.lock().unwrap().remove(job_id);
+        // Only release sleep prevention for a job that genuinely existed --
+        // an unmatched call would decrement past zero.
+        if self.cancel_flags.lock().unwrap().remove(job_id).is_some() {
+            self.sleep_guard.job_finished();
+        }
+    }
+
+    pub fn set_sleep_prevention_enabled(&self, enabled: bool) {
+        self.sleep_guard.set_enabled(enabled);
     }
 }
 
@@ -479,17 +502,34 @@ pub fn run_copy_core(
             }
         }
 
-        match copy_file_chunked(
-            &entry.absolute,
-            &dest_path,
-            &mut buffer,
-            cancel_flag,
-            &mut tracker,
-            &copy_display,
-            checksum_algorithm,
-            compute_hash,
-            entry.modified,
-        ) {
+        let mut attempt = 1;
+        let copy_result = loop {
+            // A failed attempt may have streamed some bytes into the
+            // tracker before erroring out -- roll that back before retrying
+            // from scratch, or the progress/byte totals would double-count
+            // bytes from the doomed attempt.
+            let bytes_before_attempt = tracker.bytes_copied;
+            let result = copy_file_chunked(
+                &entry.absolute,
+                &dest_path,
+                &mut buffer,
+                cancel_flag,
+                &mut tracker,
+                &copy_display,
+                checksum_algorithm,
+                compute_hash,
+                entry.modified,
+            );
+            if result.is_err() && should_retry_copy(attempt, cancel_flag.load(Ordering::SeqCst)) {
+                tracker.bytes_copied = bytes_before_attempt;
+                attempt += 1;
+                std::thread::sleep(RETRY_DELAY);
+                continue;
+            }
+            break result;
+        };
+
+        match copy_result {
             Ok(CopyFileOutcome::Completed { source_hash }) => {
                 tracker.finish_file();
                 // Feeds the MHL: `None` means Transfer mode (size-only entry, no
@@ -554,7 +594,11 @@ pub fn run_copy_core(
             }
             Err(err) => failed_files.push(FailedFile {
                 path: copy_display,
-                message: err.to_string(),
+                message: if attempt > 1 {
+                    format!("{err} (failed after {attempt} attempts)")
+                } else {
+                    err.to_string()
+                },
             }),
         }
     }
@@ -696,6 +740,24 @@ mod tests {
     impl ProgressSink for NoopSink {
         fn on_scan(&self, _total_files: u64, _total_bytes: u64) {}
         fn on_progress(&self, _payload: ProgressPayload) {}
+    }
+
+    #[test]
+    fn retries_up_to_the_attempt_budget_then_gives_up() {
+        assert!(should_retry_copy(1, false));
+        assert!(should_retry_copy(2, false));
+        assert!(
+            !should_retry_copy(MAX_COPY_ATTEMPTS, false),
+            "the last allotted attempt must not trigger yet another retry"
+        );
+    }
+
+    #[test]
+    fn never_retries_a_cancelled_copy() {
+        assert!(
+            !should_retry_copy(1, true),
+            "retrying after cancellation would ignore the user's request to stop"
+        );
     }
 
     #[test]

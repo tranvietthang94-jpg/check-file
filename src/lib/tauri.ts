@@ -114,3 +114,11 @@ export function deletePreset(name: string): Promise<void> {
 export function listTransferLogs(): Promise<TransferLogEntry[]> {
   return invoke<TransferLogEntry[]>("list_transfer_logs");
 }
+
+export function ejectDisk(mountPoint: string): Promise<void> {
+  return invoke<void>("eject_disk", { mountPoint });
+}
+
+export function setPreventSleepEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_prevent_sleep", { enabled });
+}

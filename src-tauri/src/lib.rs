@@ -4,10 +4,12 @@ mod commands;
 mod copy_engine;
 mod dedup;
 mod disks;
+mod eject;
 mod media_scan;
 mod metadata;
 mod mhl;
 mod organize;
+mod power;
 mod presets;
 mod transfer_log;
 
@@ -15,6 +17,7 @@ mod transfer_log;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(copy_engine::JobRegistry::default())
         .setup(|app| {
             disks::start_watcher(app.handle().clone());
@@ -28,7 +31,9 @@ pub fn run() {
             commands::save_preset,
             commands::list_presets,
             commands::delete_preset,
-            commands::list_transfer_logs
+            commands::list_transfer_logs,
+            commands::eject_disk,
+            commands::set_prevent_sleep
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

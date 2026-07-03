@@ -20,8 +20,12 @@ const ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
 export function SettingsPanel() {
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
+  const preventSleep = useSettingsStore((s) => s.preventSleep);
+  const desktopNotifications = useSettingsStore((s) => s.desktopNotifications);
   const setVerificationMode = useSettingsStore((s) => s.setVerificationMode);
   const setChecksumAlgorithm = useSettingsStore((s) => s.setChecksumAlgorithm);
+  const setPreventSleep = useSettingsStore((s) => s.setPreventSleep);
+  const setDesktopNotifications = useSettingsStore((s) => s.setDesktopNotifications);
 
   return (
     <section className="flex flex-col gap-2">
@@ -65,6 +69,24 @@ export function SettingsPanel() {
             </option>
           ))}
         </select>
+      </label>
+
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={preventSleep}
+          onChange={(e) => setPreventSleep(e.currentTarget.checked)}
+        />
+        Prevent sleep during transfer
+      </label>
+
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={desktopNotifications}
+          onChange={(e) => setDesktopNotifications(e.currentTarget.checked)}
+        />
+        Desktop notifications
       </label>
     </section>
   );

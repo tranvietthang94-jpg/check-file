@@ -29,7 +29,8 @@ import { MediaBrowser } from "./components/MediaBrowser";
 import { OrganizePanel } from "./components/OrganizePanel";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { TransferLogPanel } from "./components/TransferLogPanel";
-import { pathLabel } from "./lib/format";
+import { pathLabel, formatBytes } from "./lib/format";
+import { notifyTransfer } from "./lib/notify";
 import type { DiskInfo, Endpoint } from "./types/disk";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/media";
@@ -72,6 +73,7 @@ function App() {
 
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
+  const desktopNotifications = useSettingsStore((s) => s.desktopNotifications);
 
   const refreshTransferLogs = useTransferLogStore((s) => s.refresh);
 
@@ -153,13 +155,38 @@ function App() {
       // this handler runs, but the panel also offers a manual refresh in
       // case this call ever races the write.
       refreshTransferLogs();
+
+      if (desktopNotifications) {
+        const job = useTransfersStore.getState().jobs[payload.jobId];
+        const label = job ? `${job.sourceLabel} → ${job.destinationLabel}` : payload.jobId;
+        if (payload.failedFiles.length > 0) {
+          notifyTransfer(
+            "Transfer finished with errors",
+            `${label}: ${payload.failedFiles.length} file(s) failed`,
+          );
+        } else {
+          notifyTransfer(
+            "Transfer complete",
+            `${label}: ${payload.filesCopied} file(s), ${formatBytes(payload.bytesCopied)}`,
+          );
+        }
+      }
+    }
+
+    function handleCopyCancelled(payload: Parameters<typeof applyCancelled>[0]) {
+      applyCancelled(payload);
+      if (desktopNotifications) {
+        const job = useTransfersStore.getState().jobs[payload.jobId];
+        const label = job ? `${job.sourceLabel} → ${job.destinationLabel}` : payload.jobId;
+        notifyTransfer("Transfer cancelled", label);
+      }
     }
 
     const unlistenPromises = [
       onCopyScan(applyScan),
       onCopyProgress(applyProgress),
       onCopyComplete(handleCopyComplete),
-      onCopyCancelled(applyCancelled),
+      onCopyCancelled(handleCopyCancelled),
       onTransferGroupJobAdded(handleGroupJobAdded),
       onMediaScanItem(handleMediaScanItem),
       onMediaScanComplete(handleMediaScanComplete),
@@ -180,6 +207,7 @@ function App() {
     verificationMode,
     checksumAlgorithm,
     refreshTransferLogs,
+    desktopNotifications,
   ]);
 
   async function handleStartGroup(

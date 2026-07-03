@@ -6,6 +6,7 @@ use crate::cascade::{self, TransferGroupMode};
 use crate::checksum::ChecksumAlgorithm;
 use crate::copy_engine::{JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
+use crate::eject;
 use crate::media_scan;
 use crate::organize::OrganizeSettings;
 use crate::presets::{self, Preset};
@@ -68,4 +69,14 @@ pub fn delete_preset(app_handle: AppHandle, name: String) -> Result<(), String> 
 #[tauri::command]
 pub fn list_transfer_logs(app_handle: AppHandle) -> Result<Vec<TransferLogEntry>, String> {
     transfer_log::list_logs(&app_handle).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn eject_disk(mount_point: String) -> Result<(), String> {
+    eject::eject_disk(&mount_point).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_prevent_sleep(registry: State<JobRegistry>, enabled: bool) {
+    registry.set_sleep_prevention_enabled(enabled);
 }
