@@ -7,6 +7,7 @@ use crate::checksum::ChecksumAlgorithm;
 use crate::copy_engine::{JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
 use crate::media_scan;
+use crate::organize::OrganizeSettings;
 
 #[tauri::command]
 pub fn list_disks() -> Vec<DiskInfo> {
@@ -19,6 +20,7 @@ pub fn cancel_copy(registry: State<JobRegistry>, job_id: String) -> bool {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn start_transfer_group(
     app_handle: AppHandle,
     source: String,
@@ -26,6 +28,8 @@ pub fn start_transfer_group(
     mode: TransferGroupMode,
     verification_mode: VerificationMode,
     checksum_algorithm: ChecksumAlgorithm,
+    source_name: String,
+    organize: OrganizeSettings,
 ) -> String {
     cascade::start_transfer_group(
         app_handle,
@@ -34,6 +38,8 @@ pub fn start_transfer_group(
         mode,
         verification_mode,
         checksum_algorithm,
+        source_name,
+        organize,
     )
 }
 

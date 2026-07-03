@@ -18,12 +18,14 @@ import { useTransfersStore } from "./state/transfersStore";
 import { useSettingsStore } from "./state/settingsStore";
 import { useGroupsStore } from "./state/groupsStore";
 import { useMediaStore } from "./state/mediaStore";
+import { useOrganizeStore } from "./state/organizeStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { GroupComposer } from "./components/GroupComposer";
 import { MediaBrowser } from "./components/MediaBrowser";
+import { OrganizePanel } from "./components/OrganizePanel";
 import { pathLabel } from "./lib/format";
 import type { DiskInfo, Endpoint } from "./types/disk";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
@@ -67,6 +69,31 @@ function App() {
 
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
+
+  const organizeRenameTemplate = useOrganizeStore((s) => s.renameTemplate);
+  const organizeFolderTemplate = useOrganizeStore((s) => s.folderTemplate);
+  const organizeCounterPadding = useOrganizeStore((s) => s.counterPadding);
+  const organizeSelectiveCopy = useOrganizeStore((s) => s.selectiveCopy);
+  const organizeBundleIgnore = useOrganizeStore((s) => s.bundleIgnore);
+  const organizeIgnoreEmptyFolders = useOrganizeStore((s) => s.ignoreEmptyFolders);
+  const organizeFlatten = useOrganizeStore((s) => s.flatten);
+  const organizeContentDateExcludedExtensions = useOrganizeStore(
+    (s) => s.contentDateExcludedExtensions,
+  );
+  // Assembled fresh each render from the primitive selections above --
+  // deliberately not itself a selector return value, since Zustand's
+  // useSyncExternalStore compares each render's snapshot by reference and a
+  // freshly-built object there never stabilizes, causing an infinite loop.
+  const organize = {
+    renameTemplate: organizeRenameTemplate,
+    folderTemplate: organizeFolderTemplate,
+    counterPadding: organizeCounterPadding,
+    selectiveCopy: organizeSelectiveCopy,
+    bundleIgnore: organizeBundleIgnore,
+    ignoreEmptyFolders: organizeIgnoreEmptyFolders,
+    flatten: organizeFlatten,
+    contentDateExcludedExtensions: organizeContentDateExcludedExtensions,
+  };
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -151,6 +178,8 @@ function App() {
       mode,
       verificationMode,
       checksumAlgorithm,
+      endpointLabel(source, disks),
+      organize,
     );
     setGroupMeta(
       groupId,
@@ -199,6 +228,7 @@ function App() {
         />
         <div className="flex flex-col gap-6">
           <SettingsPanel />
+          <OrganizePanel />
           <GroupComposer
             sources={sources}
             destinations={destinations}

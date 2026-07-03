@@ -11,6 +11,7 @@ import type {
 } from "../types/job";
 import type { GroupJobAddedEventPayload, TransferGroupMode } from "../types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/media";
+import type { OrganizeSettings } from "../types/organize";
 
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
@@ -28,6 +29,8 @@ export function startTransferGroup(
   mode: TransferGroupMode,
   verificationMode: VerificationMode,
   checksumAlgorithm: ChecksumAlgorithm,
+  sourceName: string,
+  organize: OrganizeSettings,
 ): Promise<string> {
   return invoke<string>("start_transfer_group", {
     source,
@@ -35,6 +38,8 @@ export function startTransferGroup(
     mode,
     verificationMode,
     checksumAlgorithm,
+    sourceName,
+    organize,
   });
 }
 

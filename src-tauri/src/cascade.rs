@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::checksum::ChecksumAlgorithm;
 use crate::copy_engine::{self, CopyOutcome, JobRegistry, VerificationMode};
+use crate::organize::OrganizeSettings;
 
 pub const GROUP_JOB_ADDED_EVENT: &str = "transfer-group-job-added";
 
@@ -49,6 +50,8 @@ fn spawn_job<R: Runtime>(
     hop: u8,
     verification_mode: VerificationMode,
     checksum_algorithm: ChecksumAlgorithm,
+    source_name: String,
+    organize: OrganizeSettings,
 ) -> String {
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = app_handle.state::<JobRegistry>().register(job_id.clone());
@@ -75,6 +78,8 @@ fn spawn_job<R: Runtime>(
             cancel_flag,
             verification_mode,
             checksum_algorithm,
+            source_name,
+            organize,
         );
     });
 
@@ -92,6 +97,8 @@ pub fn start_transfer_group<R: Runtime>(
     mode: TransferGroupMode,
     verification_mode: VerificationMode,
     checksum_algorithm: ChecksumAlgorithm,
+    source_name: String,
+    organize: OrganizeSettings,
 ) -> String {
     let group_id = Uuid::new_v4().to_string();
 
@@ -106,6 +113,8 @@ pub fn start_transfer_group<R: Runtime>(
                     1,
                     verification_mode,
                     checksum_algorithm,
+                    source_name.clone(),
+                    organize.clone(),
                 );
             }
         }
@@ -132,6 +141,8 @@ pub fn start_transfer_group<R: Runtime>(
             let app_handle_thread = app_handle.clone();
             let group_id_thread = group_id.clone();
             let primary_thread = primary.clone();
+            let source_name_thread = source_name.clone();
+            let organize_thread = organize.clone();
 
             std::thread::spawn(move || {
                 let outcome = copy_engine::run_copy_job(
@@ -142,6 +153,8 @@ pub fn start_transfer_group<R: Runtime>(
                     cancel_flag,
                     verification_mode,
                     checksum_algorithm,
+                    source_name_thread.clone(),
+                    organize_thread.clone(),
                 );
 
                 if !should_cascade_continue(&outcome) {
@@ -157,6 +170,8 @@ pub fn start_transfer_group<R: Runtime>(
                         2,
                         verification_mode,
                         checksum_algorithm,
+                        source_name_thread.clone(),
+                        organize_thread.clone(),
                     );
                 }
             });
@@ -199,6 +214,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::SourceAndDestination,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
         assert!(should_cascade_continue(&hop1));
 
@@ -210,6 +227,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::SourceAndDestination,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(hop2.failed_files.is_empty());

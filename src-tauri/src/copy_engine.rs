@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use walkdir::WalkDir;
 
 use crate::checksum::{self, ChecksumAlgorithm, StreamingHasher};
 use crate::dedup::{self, DuplicateAction};
+use crate::organize::{self, OrganizeSettings, TokenContext};
 
 /// How thoroughly a transfer is checked for integrity.
 /// - `Transfer`: no hashing, relies on the OS copy completing without an I/O error.
@@ -333,8 +334,10 @@ pub fn run_copy_core(
     cancel_flag: &AtomicBool,
     verification_mode: VerificationMode,
     checksum_algorithm: ChecksumAlgorithm,
+    source_name: &str,
+    organize: &OrganizeSettings,
 ) -> CopyOutcome {
-    let entries = match scan_source(source) {
+    let mut entries = match scan_source(source) {
         Ok(e) => e,
         Err(err) => {
             return CopyOutcome {
@@ -352,9 +355,34 @@ pub fn run_copy_core(
         }
     };
 
+    if let Some(rule) = &organize.bundle_ignore {
+        let ignored_dirs = organize::find_ignored_bundle_dirs(source, rule);
+        if !ignored_dirs.is_empty() {
+            entries.retain(|e| !ignored_dirs.iter().any(|dir| e.absolute.starts_with(dir)));
+        }
+    }
+    entries.retain(|e| organize::passes_selective_filter(&e.relative, &organize.selective_copy));
+
     let total_files = entries.len() as u64;
     let total_bytes: u64 = entries.iter().map(|e| e.size).sum();
     sink.on_scan(total_files, total_bytes);
+
+    let job_started = SystemTime::now();
+    let content_oldest = organize::compute_content_oldest_date(
+        &entries
+            .iter()
+            .map(|e| (e.relative.clone(), e.modified))
+            .collect::<Vec<_>>(),
+        &organize.content_date_excluded_extensions,
+    );
+    // Source folders that still have at least one (post-filter) file in them
+    // -- anything not in here is empty and, unless `ignore_empty_folders` is
+    // disabled, never gets created at the destination.
+    let dirs_with_files: HashSet<PathBuf> = entries
+        .iter()
+        .filter_map(|e| e.relative.parent().map(|p| p.to_path_buf()))
+        .filter(|p| !p.as_os_str().is_empty())
+        .collect();
 
     let compute_hash = verification_mode != VerificationMode::Transfer;
     let mut tracker = ProgressTracker::new(sink, job_id, total_bytes, total_files);
@@ -365,24 +393,46 @@ pub fn run_copy_core(
     let mut renamed_files = Vec::new();
     let mut cancelled = false;
 
-    for entry in &entries {
+    for (index, entry) in entries.iter().enumerate() {
         if cancel_flag.load(Ordering::SeqCst) {
             cancelled = true;
             break;
         }
 
-        let mut dest_path = destination.join(&entry.relative);
+        let file_stem = entry
+            .relative
+            .file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let file_extension = entry
+            .relative
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let ctx = TokenContext {
+            source_name: source_name.to_string(),
+            job_started,
+            counter: (index + 1) as u32,
+            counter_padding: organize.counter_padding,
+            file_stem,
+            file_extension,
+            file_modified: entry.modified,
+            content_oldest,
+        };
+        let organized_relative = organize::build_destination_path(&entry.relative, &ctx, organize);
+
+        let mut dest_path = destination.join(&organized_relative);
         if let Some(parent) = dest_path.parent() {
             if let Err(err) = fs::create_dir_all(parent) {
                 failed_files.push(FailedFile {
-                    path: entry.relative.display().to_string(),
+                    path: organized_relative.display().to_string(),
                     message: err.to_string(),
                 });
                 continue;
             }
         }
 
-        let relative_display = entry.relative.display().to_string();
+        let relative_display = organized_relative.display().to_string();
         // Tracks the path actually written to, which diverges from
         // `relative_display` after a rename -- everything downstream
         // (copying, verification, error reporting) must refer to this one
@@ -479,6 +529,13 @@ pub fn run_copy_core(
 
     if !cancelled {
         tracker.emit(""); // final flush so the UI can reach 100%
+
+        if !organize.ignore_empty_folders
+            && !organize.flatten
+            && organize.folder_template.is_none()
+        {
+            let _ = organize::mirror_empty_source_dirs(source, destination, &dirs_with_files);
+        }
     }
 
     CopyOutcome {
@@ -527,6 +584,8 @@ pub fn run_copy_job<R: Runtime>(
     cancel_flag: Arc<AtomicBool>,
     verification_mode: VerificationMode,
     checksum_algorithm: ChecksumAlgorithm,
+    source_name: String,
+    organize: OrganizeSettings,
 ) -> CopyOutcome {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
@@ -540,6 +599,8 @@ pub fn run_copy_job<R: Runtime>(
         &cancel_flag,
         verification_mode,
         checksum_algorithm,
+        &source_name,
+        &organize,
     );
 
     if outcome.cancelled {
@@ -596,6 +657,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(!outcome.cancelled);
@@ -627,6 +690,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(outcome.cancelled);
@@ -646,6 +711,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert_eq!(outcome.files_copied, 0);
@@ -680,6 +747,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         // The final flush always emits at least one progress event.
@@ -703,6 +772,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(!outcome.cancelled);
@@ -728,6 +799,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Source,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -754,6 +827,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::SourceAndDestination,
             ChecksumAlgorithm::Md5,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -781,6 +856,8 @@ mod tests {
                 cancel,
                 VerificationMode::Transfer,
                 ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
             )
         };
 
@@ -818,6 +895,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -866,6 +945,8 @@ mod tests {
             &cancel_flag,
             VerificationMode::Transfer,
             ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
         );
 
         let dest_modified = fs::metadata(dst_dir.path().join("clip.mp4"))
@@ -879,5 +960,100 @@ mod tests {
              same card would misdetect every file as a rename-worthy collision instead \
              of an already-copied duplicate"
         );
+    }
+
+    #[test]
+    fn organize_rename_and_folder_templates_control_the_destination_layout() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("C0001.MP4"), b"footage").unwrap();
+
+        let mut organize = OrganizeSettings::default();
+        organize.rename_template = Some("{Source Name}_{File Counter}".to_string());
+        organize.folder_template = Some("{File Extension}".to_string());
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-organize-rename".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "A-Cam",
+            &organize,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(
+            fs::read(dst_dir.path().join("MP4").join("A-Cam_00001.MP4")).unwrap(),
+            b"footage"
+        );
+    }
+
+    #[test]
+    fn organize_selective_filter_excludes_matching_files_from_the_copy() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("clip.mp4"), b"footage").unwrap();
+        fs::write(src_dir.path().join("clip.xml"), b"sidecar").unwrap();
+
+        let mut organize = OrganizeSettings::default();
+        organize.selective_copy = crate::organize::SelectiveCopyFilter {
+            mode: crate::organize::SelectiveCopyMode::Exclude,
+            patterns: vec![".xml".to_string()],
+        };
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-organize-filter".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &organize,
+        );
+
+        assert_eq!(outcome.files_copied, 1);
+        assert!(dst_dir.path().join("clip.mp4").exists());
+        assert!(!dst_dir.path().join("clip.xml").exists());
+    }
+
+    #[test]
+    fn organize_bundle_ignore_skips_a_small_bundle_but_keeps_a_populated_one() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+
+        let empty_bundle = src_dir.path().join("PRIVATE");
+        fs::create_dir_all(&empty_bundle).unwrap();
+        fs::write(empty_bundle.join("stub.bin"), vec![0u8; 10]).unwrap();
+        fs::write(src_dir.path().join("clip.mp4"), vec![0u8; 10_000]).unwrap();
+
+        let mut organize = OrganizeSettings::default();
+        organize.bundle_ignore = Some(crate::organize::BundleIgnoreRule {
+            name: "PRIVATE".to_string(),
+            max_size_bytes: 100,
+        });
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-organize-bundle".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &organize,
+        );
+
+        assert_eq!(outcome.files_copied, 1);
+        assert!(dst_dir.path().join("clip.mp4").exists());
+        assert!(!dst_dir.path().join("PRIVATE").exists());
     }
 }

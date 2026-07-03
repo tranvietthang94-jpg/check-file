@@ -6,6 +6,7 @@ mod dedup;
 mod disks;
 mod media_scan;
 mod metadata;
+mod organize;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
