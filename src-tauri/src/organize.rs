@@ -4,7 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use chrono::{DateTime, Datelike, Local, Timelike};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
@@ -34,6 +34,71 @@ impl Default for SelectiveCopyFilter {
             patterns: Vec::new(),
         }
     }
+}
+
+/// Whether the "shoot date" fed into `{YYYY}{MM}{DD}` etc. tokens tracks the
+/// real system clock or a manually pinned date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DateOverrideMode {
+    Automatic,
+    Manual,
+}
+
+/// Lets a job's shoot date diverge from the computer's real clock -- e.g. to
+/// keep offloading "yesterday's" overnight footage without having to change
+/// the system date, or to give a whole multi-day festival dump one shoot date.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DateTimeOverride {
+    pub mode: DateOverrideMode,
+    /// ISO `YYYY-MM-DD` date used verbatim (with the real time-of-day kept)
+    /// when `mode` is `Manual`. Ignored in `Automatic` mode. An unparsable or
+    /// absent value falls back to the real date rather than failing the
+    /// transfer, matching `render_template`'s "degrade, don't error" policy.
+    pub manual_date: Option<String>,
+    /// Only meaningful in `Automatic` mode: treats times between midnight and
+    /// 4am as still belonging to the previous calendar day, so footage from
+    /// an overnight shoot keeps a consistent shoot-day date instead of
+    /// rolling over right at midnight.
+    pub rollover_at_4am: bool,
+}
+
+impl Default for DateTimeOverride {
+    fn default() -> Self {
+        Self {
+            mode: DateOverrideMode::Automatic,
+            manual_date: None,
+            rollover_at_4am: false,
+        }
+    }
+}
+
+/// Resolves the real `now` against a `DateTimeOverride`, producing the
+/// timestamp that should feed the plain (non-`File`/`Content`) date tokens.
+pub fn effective_job_date(now: SystemTime, date_override: &DateTimeOverride) -> SystemTime {
+    let now_local: DateTime<Local> = now.into();
+
+    if date_override.mode == DateOverrideMode::Manual {
+        if let Some(date_str) = &date_override.manual_date {
+            if let Ok(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                let naive = date.and_time(now_local.time());
+                if let Some(local_dt) = Local.from_local_datetime(&naive).single() {
+                    return local_dt.into();
+                }
+            }
+        }
+        return now;
+    }
+
+    if date_override.rollover_at_4am && now_local.hour() < 4 {
+        let rolled_date = now_local.date_naive() - chrono::Duration::days(1);
+        let naive = rolled_date.and_time(now_local.time());
+        if let Some(local_dt) = Local.from_local_datetime(&naive).single() {
+            return local_dt.into();
+        }
+    }
+    now
 }
 
 /// Ignores a whole folder (e.g. an empty camera-generated bundle) by name,
@@ -73,6 +138,11 @@ pub struct OrganizeSettings {
     /// file date for `{Content *}` tokens, e.g. sidecar XML/metadata files
     /// that would otherwise skew the shoot day.
     pub content_date_excluded_extensions: Vec<String>,
+    /// Overrides the shoot date fed into the plain `{YYYY}{MM}{DD}` etc.
+    /// tokens. `#[serde(default)]` so presets saved before this field existed
+    /// still load, falling back to "follow the system clock".
+    #[serde(default)]
+    pub date_override: DateTimeOverride,
 }
 
 impl Default for OrganizeSettings {
@@ -86,6 +156,7 @@ impl Default for OrganizeSettings {
             ignore_empty_folders: true,
             flatten: false,
             content_date_excluded_extensions: Vec::new(),
+            date_override: DateTimeOverride::default(),
         }
     }
 }
@@ -469,6 +540,75 @@ mod tests {
         ];
         let oldest = compute_content_oldest_date(&files, &["xml".to_string()]);
         assert_eq!(oldest, Some(old));
+    }
+
+    #[test]
+    fn automatic_mode_without_rollover_returns_now_unchanged() {
+        let now = local_time(2020, 9, 13, 2, 30, 0);
+        let result = effective_job_date(now, &DateTimeOverride::default());
+        assert_eq!(result, now);
+    }
+
+    #[test]
+    fn rollover_pushes_early_morning_times_back_to_the_previous_day() {
+        let now = local_time(2020, 9, 13, 2, 30, 0); // 2:30am
+        let date_override = DateTimeOverride {
+            mode: DateOverrideMode::Automatic,
+            manual_date: None,
+            rollover_at_4am: true,
+        };
+        let result = effective_job_date(now, &date_override);
+        let dt: DateTime<Local> = result.into();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2020, 9, 12));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (2, 30, 0));
+    }
+
+    #[test]
+    fn rollover_leaves_times_at_or_after_4am_on_the_real_day() {
+        let now = local_time(2020, 9, 13, 4, 0, 0);
+        let date_override = DateTimeOverride {
+            mode: DateOverrideMode::Automatic,
+            manual_date: None,
+            rollover_at_4am: true,
+        };
+        let result = effective_job_date(now, &date_override);
+        assert_eq!(result, now);
+    }
+
+    #[test]
+    fn manual_mode_pins_the_date_but_keeps_the_real_time_of_day() {
+        let now = local_time(2020, 9, 13, 14, 5, 30);
+        let date_override = DateTimeOverride {
+            mode: DateOverrideMode::Manual,
+            manual_date: Some("2019-01-01".to_string()),
+            rollover_at_4am: false,
+        };
+        let result = effective_job_date(now, &date_override);
+        let dt: DateTime<Local> = result.into();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2019, 1, 1));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (14, 5, 30));
+    }
+
+    #[test]
+    fn manual_mode_with_unparsable_date_falls_back_to_now() {
+        let now = local_time(2020, 9, 13, 14, 5, 30);
+        let date_override = DateTimeOverride {
+            mode: DateOverrideMode::Manual,
+            manual_date: Some("not-a-date".to_string()),
+            rollover_at_4am: false,
+        };
+        assert_eq!(effective_job_date(now, &date_override), now);
+    }
+
+    #[test]
+    fn manual_mode_with_no_date_set_falls_back_to_now() {
+        let now = local_time(2020, 9, 13, 14, 5, 30);
+        let date_override = DateTimeOverride {
+            mode: DateOverrideMode::Manual,
+            manual_date: None,
+            rollover_at_4am: false,
+        };
+        assert_eq!(effective_job_date(now, &date_override), now);
     }
 
     #[test]

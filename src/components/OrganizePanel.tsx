@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { useOrganizeStore } from "../state/organizeStore";
-import { previewDestinationPath } from "../lib/tokenEngine";
-import type { SelectiveCopyMode } from "../types/organize";
+import { effectiveJobDate, previewDestinationPath } from "../lib/tokenEngine";
+import type { DateOverrideMode, SelectiveCopyMode } from "../types/organize";
 
 const TOKEN_REFERENCE =
   "{Source Name} {Counter} {YYYY}{YY}{MM}{DD}{hh}{mm}{ss} · " +
   "{Filename} {File Counter} {File Extension} {File YYYY}.. · {Content YYYY}..";
+
+const NOW = new Date();
 
 const PREVIEW_CONTEXT = {
   sourceName: "A-Cam",
   counter: 1,
   fileStem: "C0001",
   fileExtension: "MP4",
-  now: new Date(),
+  now: NOW,
 };
 
 function parseList(value: string): string[] {
@@ -31,6 +33,7 @@ export function OrganizePanel() {
   const ignoreEmptyFolders = useOrganizeStore((s) => s.ignoreEmptyFolders);
   const flatten = useOrganizeStore((s) => s.flatten);
   const contentDateExcludedExtensions = useOrganizeStore((s) => s.contentDateExcludedExtensions);
+  const dateOverride = useOrganizeStore((s) => s.dateOverride);
 
   const setRenameTemplate = useOrganizeStore((s) => s.setRenameTemplate);
   const setFolderTemplate = useOrganizeStore((s) => s.setFolderTemplate);
@@ -41,6 +44,9 @@ export function OrganizePanel() {
   const setIgnoreEmptyFolders = useOrganizeStore((s) => s.setIgnoreEmptyFolders);
   const setFlatten = useOrganizeStore((s) => s.setFlatten);
   const setContentDateExcludedExtensions = useOrganizeStore((s) => s.setContentDateExcludedExtensions);
+  const setDateOverrideMode = useOrganizeStore((s) => s.setDateOverrideMode);
+  const setManualDate = useOrganizeStore((s) => s.setManualDate);
+  const setRolloverAt4am = useOrganizeStore((s) => s.setRolloverAt4am);
 
   const [patternsText, setPatternsText] = useState(selectiveCopy.patterns.join(", "));
   const [excludedExtText, setExcludedExtText] = useState(
@@ -74,8 +80,9 @@ export function OrganizePanel() {
       ignoreEmptyFolders,
       flatten,
       contentDateExcludedExtensions,
+      dateOverride,
     },
-    { ...PREVIEW_CONTEXT, counterPadding },
+    { ...PREVIEW_CONTEXT, counterPadding, jobStarted: effectiveJobDate(NOW, dateOverride) },
   );
 
   return (
@@ -234,6 +241,56 @@ export function OrganizePanel() {
           className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
         />
       </label>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+          {"{YYYY}{MM}{DD}"} shoot date
+        </span>
+        <div className="flex gap-3 text-xs">
+          {(["automatic", "manual"] as DateOverrideMode[]).map((m) => (
+            <label key={m} className="flex items-center gap-1">
+              <input
+                type="radio"
+                name="date-override-mode"
+                checked={dateOverride.mode === m}
+                onChange={() => setDateOverrideMode(m)}
+              />
+              {m === "automatic" ? "Follow system clock" : "Set manually"}
+            </label>
+          ))}
+        </div>
+
+        {dateOverride.mode === "automatic" ? (
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={dateOverride.rolloverAt4am}
+              onChange={(e) => setRolloverAt4am(e.currentTarget.checked)}
+            />
+            Roll over at 4am (overnight shoots keep yesterday's date)
+          </label>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              title="Shoot date"
+              value={dateOverride.manualDate ?? ""}
+              onChange={(e) => setManualDate(e.currentTarget.value || null)}
+              className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setDateOverrideMode("automatic");
+                setManualDate(null);
+              }}
+              className="rounded border border-neutral-700 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-800"
+            >
+              Now
+            </button>
+          </div>
+        )}
+      </div>
     </section>
   );
 }

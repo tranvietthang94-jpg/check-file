@@ -412,7 +412,7 @@ pub fn run_copy_core(
     let total_bytes: u64 = entries.iter().map(|e| e.size).sum();
     sink.on_scan(total_files, total_bytes);
 
-    let job_started = SystemTime::now();
+    let job_started = organize::effective_job_date(SystemTime::now(), &organize.date_override);
     let content_oldest = organize::compute_content_oldest_date(
         &entries
             .iter()

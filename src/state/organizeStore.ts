@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { defaultOrganizeSettings } from "../types/organize";
-import type { BundleIgnoreRule, OrganizeSettings, SelectiveCopyMode } from "../types/organize";
+import type {
+  BundleIgnoreRule,
+  DateOverrideMode,
+  OrganizeSettings,
+  SelectiveCopyMode,
+} from "../types/organize";
 
 interface OrganizeState extends OrganizeSettings {
   setRenameTemplate: (template: string) => void;
@@ -12,6 +17,9 @@ interface OrganizeState extends OrganizeSettings {
   setIgnoreEmptyFolders: (value: boolean) => void;
   setFlatten: (value: boolean) => void;
   setContentDateExcludedExtensions: (extensions: string[]) => void;
+  setDateOverrideMode: (mode: DateOverrideMode) => void;
+  setManualDate: (date: string | null) => void;
+  setRolloverAt4am: (value: boolean) => void;
   /** Replaces every field at once -- used when applying a loaded preset. */
   loadSettings: (settings: OrganizeSettings) => void;
 }
@@ -37,5 +45,11 @@ export const useOrganizeStore = create<OrganizeState>((set) => ({
   setFlatten: (flatten) => set({ flatten }),
   setContentDateExcludedExtensions: (contentDateExcludedExtensions) =>
     set({ contentDateExcludedExtensions }),
+  setDateOverrideMode: (mode) =>
+    set((state) => ({ dateOverride: { ...state.dateOverride, mode } })),
+  setManualDate: (manualDate) =>
+    set((state) => ({ dateOverride: { ...state.dateOverride, manualDate } })),
+  setRolloverAt4am: (rolloverAt4am) =>
+    set((state) => ({ dateOverride: { ...state.dateOverride, rolloverAt4am } })),
   loadSettings: (settings) => set({ ...settings }),
 }));

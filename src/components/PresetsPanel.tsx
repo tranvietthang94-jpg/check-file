@@ -24,6 +24,7 @@ export function PresetsPanel() {
   const ignoreEmptyFolders = useOrganizeStore((s) => s.ignoreEmptyFolders);
   const flatten = useOrganizeStore((s) => s.flatten);
   const contentDateExcludedExtensions = useOrganizeStore((s) => s.contentDateExcludedExtensions);
+  const dateOverride = useOrganizeStore((s) => s.dateOverride);
   const loadOrganizeSettings = useOrganizeStore((s) => s.loadSettings);
 
   const [newName, setNewName] = useState("");
@@ -50,6 +51,7 @@ export function PresetsPanel() {
           ignoreEmptyFolders,
           flatten,
           contentDateExcludedExtensions,
+          dateOverride,
         },
       });
       setNewName("");

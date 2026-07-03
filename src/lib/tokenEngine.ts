@@ -1,4 +1,4 @@
-import type { OrganizeSettings } from "../types/organize";
+import type { DateTimeOverride, OrganizeSettings } from "../types/organize";
 
 /**
  * Display-only mirror of src-tauri/src/organize.rs's token engine, used for
@@ -11,8 +11,35 @@ export interface TokenPreviewContext {
   counterPadding: number;
   fileStem: string;
   fileExtension: string;
-  /** Stands in for job-start, per-file, and content-oldest timestamps alike. */
+  /** Shoot date fed into the plain `{YYYY}{MM}{DD}` etc. tokens -- see `effectiveJobDate`. */
+  jobStarted: Date;
+  /** Stands in for per-file and content-oldest timestamps alike. */
   now: Date;
+}
+
+/**
+ * Display-only mirror of `organize::effective_job_date` -- resolves a
+ * `DateTimeOverride` against the real clock for the live preview only.
+ */
+export function effectiveJobDate(now: Date, dateOverride: DateTimeOverride): Date {
+  if (dateOverride.mode === "manual") {
+    if (dateOverride.manualDate) {
+      const [y, m, d] = dateOverride.manualDate.split("-").map(Number);
+      if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) {
+        const pinned = new Date(now);
+        pinned.setFullYear(y, m - 1, d);
+        return pinned;
+      }
+    }
+    return now;
+  }
+
+  if (dateOverride.rolloverAt4am && now.getHours() < 4) {
+    const rolled = new Date(now);
+    rolled.setDate(rolled.getDate() - 1);
+    return rolled;
+  }
+  return now;
 }
 
 function pad(n: number, width: number): string {
@@ -38,7 +65,7 @@ export function renderTemplate(template: string, ctx: TokenPreviewContext): stri
     ["{Filename}", ctx.fileStem],
     ["{File Counter}", pad(ctx.counter, 5)],
     ["{File Extension}", ctx.fileExtension],
-    ...dateTokens("", ctx.now),
+    ...dateTokens("", ctx.jobStarted),
     ...dateTokens("File ", ctx.now),
     ...dateTokens("Content ", ctx.now),
   ];
