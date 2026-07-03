@@ -9,6 +9,7 @@ use crate::disks::{enumerate_disks, DiskInfo};
 use crate::media_scan;
 use crate::organize::OrganizeSettings;
 use crate::presets::{self, Preset};
+use crate::transfer_log::{self, TransferLogEntry};
 
 #[tauri::command]
 pub fn list_disks() -> Vec<DiskInfo> {
@@ -62,4 +63,9 @@ pub fn list_presets(app_handle: AppHandle) -> Result<Vec<Preset>, String> {
 #[tauri::command]
 pub fn delete_preset(app_handle: AppHandle, name: String) -> Result<(), String> {
     presets::delete_preset(&app_handle, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_transfer_logs(app_handle: AppHandle) -> Result<Vec<TransferLogEntry>, String> {
+    transfer_log::list_logs(&app_handle).map_err(|e| e.to_string())
 }

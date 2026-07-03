@@ -32,6 +32,7 @@ hex = "0.4.3"
 kamadak-exif = "0.6.1"
 base64 = "0.22.1"
 chrono = "0.4"
+quick-xml = "0.41"
 
 [dev-dependencies]
 tempfile = "3.27.0"

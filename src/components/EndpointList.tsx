@@ -7,7 +7,7 @@ interface EndpointListProps {
   onRemove: (diskId: string) => void;
   onLabelChange: (diskId: string, label: string) => void;
   onPathChange: (diskId: string, path: string) => void;
-  onBrowse?: (endpoint: Endpoint) => void;
+  onBrowse?: (path: string) => void;
 }
 
 export function EndpointList({
@@ -52,7 +52,7 @@ export function EndpointList({
                 {onBrowse && (
                   <button
                     type="button"
-                    onClick={() => onBrowse(endpoint)}
+                    onClick={() => onBrowse(endpoint.path)}
                     className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
                   >
                     Browse

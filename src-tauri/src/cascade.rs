@@ -247,6 +247,7 @@ mod tests {
             verified_files: Vec::new(),
             skipped_files: Vec::new(),
             renamed_files: Vec::new(),
+            mhl_entries: Vec::new(),
         }
     }
 

@@ -6,8 +6,10 @@ mod dedup;
 mod disks;
 mod media_scan;
 mod metadata;
+mod mhl;
 mod organize;
 mod presets;
+mod transfer_log;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,7 +27,8 @@ pub fn run() {
             commands::start_media_scan,
             commands::save_preset,
             commands::list_presets,
-            commands::delete_preset
+            commands::delete_preset,
+            commands::list_transfer_logs
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

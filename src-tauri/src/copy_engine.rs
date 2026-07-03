@@ -12,7 +12,9 @@ use walkdir::WalkDir;
 
 use crate::checksum::{self, ChecksumAlgorithm, StreamingHasher};
 use crate::dedup::{self, DuplicateAction};
+use crate::mhl::{self, MhlFileEntry};
 use crate::organize::{self, OrganizeSettings, TokenContext};
+use crate::transfer_log::{self, TransferLogEntry};
 
 /// How thoroughly a transfer is checked for integrity.
 /// - `Transfer`: no hashing, relies on the OS copy completing without an I/O error.
@@ -53,14 +55,14 @@ pub struct ProgressPayload {
     pub bytes_per_sec: u64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FailedFile {
     pub path: String,
     pub message: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifiedFile {
     pub path: String,
@@ -70,7 +72,7 @@ pub struct VerifiedFile {
 
 /// A file that already existed at the destination with the same name, size,
 /// and modified time -- treated as already offloaded and not copied again.
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SkippedFile {
     pub path: String,
@@ -79,7 +81,7 @@ pub struct SkippedFile {
 /// A file that collided on name with a different file already at the
 /// destination (different size or modified time), so it was copied under a
 /// new name instead of overwriting.
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RenamedFile {
     pub original_path: String,
@@ -123,6 +125,9 @@ pub struct CopyOutcome {
     pub verified_files: Vec<VerifiedFile>,
     pub skipped_files: Vec<SkippedFile>,
     pub renamed_files: Vec<RenamedFile>,
+    /// One entry per successfully (and, when verification ran, successfully
+    /// verified) copied file -- feeds the MHL written at the destination root.
+    pub mhl_entries: Vec<MhlFileEntry>,
 }
 
 /// Destination for scan/progress notifications. Kept separate from Tauri so
@@ -351,6 +356,7 @@ pub fn run_copy_core(
                 verified_files: Vec::new(),
                 skipped_files: Vec::new(),
                 renamed_files: Vec::new(),
+                mhl_entries: Vec::new(),
             };
         }
     };
@@ -391,6 +397,7 @@ pub fn run_copy_core(
     let mut verified_files = Vec::new();
     let mut skipped_files = Vec::new();
     let mut renamed_files = Vec::new();
+    let mut mhl_entries = Vec::new();
     let mut cancelled = false;
 
     for (index, entry) in entries.iter().enumerate() {
@@ -485,35 +492,60 @@ pub fn run_copy_core(
         ) {
             Ok(CopyFileOutcome::Completed { source_hash }) => {
                 tracker.finish_file();
+                // Feeds the MHL: `None` means Transfer mode (size-only entry, no
+                // hash computed); a failed/mismatched verification below clears
+                // `record_in_mhl` so a bad copy is never recorded as trustworthy.
+                let mut mhl_checksum: Option<String> = None;
+                let mut record_in_mhl = true;
                 if let Some(hash) = source_hash {
                     if verification_mode == VerificationMode::SourceAndDestination {
                         match checksum::verify_file_hash(&dest_path, &hash, checksum_algorithm) {
-                            Ok(true) => verified_files.push(VerifiedFile {
-                                path: copy_display,
-                                checksum: hash,
-                                algorithm: checksum_algorithm,
-                            }),
-                            Ok(false) => failed_files.push(FailedFile {
-                                path: copy_display,
-                                message:
-                                    "checksum mismatch: source and destination differ after copy"
-                                        .to_string(),
-                            }),
-                            Err(err) => failed_files.push(FailedFile {
-                                path: copy_display,
-                                message: format!(
-                                    "could not re-read destination for verification: {err}"
-                                ),
-                            }),
+                            Ok(true) => {
+                                verified_files.push(VerifiedFile {
+                                    path: copy_display.clone(),
+                                    checksum: hash.clone(),
+                                    algorithm: checksum_algorithm,
+                                });
+                                mhl_checksum = Some(hash);
+                            }
+                            Ok(false) => {
+                                failed_files.push(FailedFile {
+                                    path: copy_display.clone(),
+                                    message:
+                                        "checksum mismatch: source and destination differ after copy"
+                                            .to_string(),
+                                });
+                                record_in_mhl = false;
+                            }
+                            Err(err) => {
+                                failed_files.push(FailedFile {
+                                    path: copy_display.clone(),
+                                    message: format!(
+                                        "could not re-read destination for verification: {err}"
+                                    ),
+                                });
+                                record_in_mhl = false;
+                            }
                         }
                     } else {
                         // Source-only mode: nothing to compare against yet, just record it.
                         verified_files.push(VerifiedFile {
-                            path: copy_display,
-                            checksum: hash,
+                            path: copy_display.clone(),
+                            checksum: hash.clone(),
                             algorithm: checksum_algorithm,
                         });
+                        mhl_checksum = Some(hash);
                     }
+                }
+                if record_in_mhl {
+                    mhl_entries.push(MhlFileEntry {
+                        relative_path: copy_display,
+                        size: entry.size,
+                        modified: entry.modified,
+                        checksum: mhl_checksum,
+                        algorithm: checksum_algorithm,
+                        hashed_at: SystemTime::now(),
+                    });
                 }
             }
             Ok(CopyFileOutcome::Cancelled) => {
@@ -546,6 +578,7 @@ pub fn run_copy_core(
         verified_files,
         skipped_files,
         renamed_files,
+        mhl_entries,
     }
 }
 
@@ -591,6 +624,7 @@ pub fn run_copy_job<R: Runtime>(
         app_handle: &app_handle,
         job_id: job_id.clone(),
     };
+    let started_at = SystemTime::now();
     let outcome = run_copy_core(
         &sink,
         job_id.clone(),
@@ -602,6 +636,7 @@ pub fn run_copy_job<R: Runtime>(
         &source_name,
         &organize,
     );
+    let finished_at = SystemTime::now();
 
     if outcome.cancelled {
         let _ = app_handle.emit(
@@ -623,6 +658,30 @@ pub fn run_copy_job<R: Runtime>(
                 renamed_files: outcome.renamed_files.clone(),
             },
         );
+
+        let mhl_path = mhl::write_mhl(&destination, &outcome.mhl_entries, started_at, finished_at)
+            .ok()
+            .flatten()
+            .map(|p| p.display().to_string());
+
+        let log_entry = TransferLogEntry {
+            job_id: job_id.clone(),
+            source_name,
+            source: source.display().to_string(),
+            destination: destination.display().to_string(),
+            verification_mode,
+            checksum_algorithm,
+            started_at: mhl::iso8601(started_at),
+            finished_at: mhl::iso8601(finished_at),
+            files_copied: outcome.files_copied,
+            bytes_copied: outcome.bytes_copied,
+            failed_files: outcome.failed_files.clone(),
+            verified_files: outcome.verified_files.clone(),
+            skipped_files: outcome.skipped_files.clone(),
+            renamed_files: outcome.renamed_files.clone(),
+            mhl_path,
+        };
+        let _ = transfer_log::save_log(&app_handle, &log_entry);
     }
 
     app_handle.state::<JobRegistry>().remove(&job_id);
@@ -1055,5 +1114,58 @@ mod tests {
         assert_eq!(outcome.files_copied, 1);
         assert!(dst_dir.path().join("clip.mp4").exists());
         assert!(!dst_dir.path().join("PRIVATE").exists());
+    }
+
+    #[test]
+    fn verified_copies_populate_mhl_entries_with_the_matching_checksum() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("clip.mp4"), b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-mhl".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+        );
+
+        assert_eq!(outcome.mhl_entries.len(), 1);
+        assert_eq!(outcome.mhl_entries[0].relative_path, "clip.mp4");
+        assert_eq!(
+            outcome.mhl_entries[0].checksum.as_deref(),
+            Some(outcome.verified_files[0].checksum.as_str()),
+        );
+    }
+
+    #[test]
+    fn transfer_mode_copies_still_populate_mhl_entries_without_a_checksum() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("clip.mp4"), b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-mhl-transfer".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+        );
+
+        assert_eq!(outcome.mhl_entries.len(), 1);
+        assert!(
+            outcome.mhl_entries[0].checksum.is_none(),
+            "Transfer mode never computes a hash, so the MHL entry must be size-only"
+        );
     }
 }

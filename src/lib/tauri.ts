@@ -13,6 +13,7 @@ import type { GroupJobAddedEventPayload, TransferGroupMode } from "../types/tran
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/media";
 import type { OrganizeSettings } from "../types/organize";
 import type { Preset } from "../types/preset";
+import type { TransferLogEntry } from "../types/transferLog";
 
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
@@ -108,4 +109,8 @@ export function listPresets(): Promise<Preset[]> {
 
 export function deletePreset(name: string): Promise<void> {
   return invoke<void>("delete_preset", { name });
+}
+
+export function listTransferLogs(): Promise<TransferLogEntry[]> {
+  return invoke<TransferLogEntry[]>("list_transfer_logs");
 }

@@ -19,6 +19,7 @@ import { useSettingsStore } from "./state/settingsStore";
 import { useGroupsStore } from "./state/groupsStore";
 import { useMediaStore } from "./state/mediaStore";
 import { useOrganizeStore } from "./state/organizeStore";
+import { useTransferLogStore } from "./state/transferLogStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
@@ -27,6 +28,7 @@ import { GroupComposer } from "./components/GroupComposer";
 import { MediaBrowser } from "./components/MediaBrowser";
 import { OrganizePanel } from "./components/OrganizePanel";
 import { PresetsPanel } from "./components/PresetsPanel";
+import { TransferLogPanel } from "./components/TransferLogPanel";
 import { pathLabel } from "./lib/format";
 import type { DiskInfo, Endpoint } from "./types/disk";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
@@ -70,6 +72,8 @@ function App() {
 
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
+
+  const refreshTransferLogs = useTransferLogStore((s) => s.refresh);
 
   const organizeRenameTemplate = useOrganizeStore((s) => s.renameTemplate);
   const organizeFolderTemplate = useOrganizeStore((s) => s.folderTemplate);
@@ -142,10 +146,19 @@ function App() {
       completeMediaScan(payload.scanId, payload.total);
     }
 
+    function handleCopyComplete(payload: Parameters<typeof applyComplete>[0]) {
+      applyComplete(payload);
+      // The backend writes the transfer log/MHL right after emitting this
+      // event, on the same thread -- usually already on disk by the time
+      // this handler runs, but the panel also offers a manual refresh in
+      // case this call ever races the write.
+      refreshTransferLogs();
+    }
+
     const unlistenPromises = [
       onCopyScan(applyScan),
       onCopyProgress(applyProgress),
-      onCopyComplete(applyComplete),
+      onCopyComplete(handleCopyComplete),
       onCopyCancelled(applyCancelled),
       onTransferGroupJobAdded(handleGroupJobAdded),
       onMediaScanItem(handleMediaScanItem),
@@ -166,6 +179,7 @@ function App() {
     completeMediaScan,
     verificationMode,
     checksumAlgorithm,
+    refreshTransferLogs,
   ]);
 
   async function handleStartGroup(
@@ -198,9 +212,9 @@ function App() {
     group.jobIds.forEach((jobId) => handleCancelJob(jobId));
   }
 
-  async function handleBrowse(endpoint: Endpoint) {
-    const scanId = await startMediaScan(endpoint.path);
-    startMediaScanState(scanId, endpoint.path);
+  async function handleBrowse(path: string) {
+    const scanId = await startMediaScan(path);
+    startMediaScanState(scanId, path);
   }
 
   const activeScan = activeScanId ? mediaScans[activeScanId] : undefined;
@@ -244,6 +258,7 @@ function App() {
           onCancelJob={handleCancelJob}
           onCancelGroup={handleCancelGroup}
         />
+        <TransferLogPanel onViewClips={handleBrowse} />
         {activeScan && (
           <MediaBrowser
             folder={activeScan.folder}
