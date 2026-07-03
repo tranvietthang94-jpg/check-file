@@ -12,6 +12,8 @@ interface OrganizeState extends OrganizeSettings {
   setIgnoreEmptyFolders: (value: boolean) => void;
   setFlatten: (value: boolean) => void;
   setContentDateExcludedExtensions: (extensions: string[]) => void;
+  /** Replaces every field at once -- used when applying a loaded preset. */
+  loadSettings: (settings: OrganizeSettings) => void;
 }
 
 /** Empty string collapses to `null` -- "no template" is the actual default state. */
@@ -35,4 +37,5 @@ export const useOrganizeStore = create<OrganizeState>((set) => ({
   setFlatten: (flatten) => set({ flatten }),
   setContentDateExcludedExtensions: (contentDateExcludedExtensions) =>
     set({ contentDateExcludedExtensions }),
+  loadSettings: (settings) => set({ ...settings }),
 }));

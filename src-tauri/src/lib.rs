@@ -7,6 +7,7 @@ mod disks;
 mod media_scan;
 mod metadata;
 mod organize;
+mod presets;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,7 +22,10 @@ pub fn run() {
             commands::list_disks,
             commands::cancel_copy,
             commands::start_transfer_group,
-            commands::start_media_scan
+            commands::start_media_scan,
+            commands::save_preset,
+            commands::list_presets,
+            commands::delete_preset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,6 +26,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { GroupComposer } from "./components/GroupComposer";
 import { MediaBrowser } from "./components/MediaBrowser";
 import { OrganizePanel } from "./components/OrganizePanel";
+import { PresetsPanel } from "./components/PresetsPanel";
 import { pathLabel } from "./lib/format";
 import type { DiskInfo, Endpoint } from "./types/disk";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
@@ -229,6 +230,7 @@ function App() {
         <div className="flex flex-col gap-6">
           <SettingsPanel />
           <OrganizePanel />
+          <PresetsPanel />
           <GroupComposer
             sources={sources}
             destinations={destinations}

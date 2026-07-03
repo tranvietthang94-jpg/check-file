@@ -8,6 +8,7 @@ use crate::copy_engine::{JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
 use crate::media_scan;
 use crate::organize::OrganizeSettings;
+use crate::presets::{self, Preset};
 
 #[tauri::command]
 pub fn list_disks() -> Vec<DiskInfo> {
@@ -46,4 +47,19 @@ pub fn start_transfer_group(
 #[tauri::command]
 pub fn start_media_scan(app_handle: AppHandle, folder: String) -> String {
     media_scan::start_media_scan(app_handle, PathBuf::from(folder))
+}
+
+#[tauri::command]
+pub fn save_preset(app_handle: AppHandle, preset: Preset) -> Result<(), String> {
+    presets::save_preset(&app_handle, &preset).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_presets(app_handle: AppHandle) -> Result<Vec<Preset>, String> {
+    presets::list_presets(&app_handle).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_preset(app_handle: AppHandle, name: String) -> Result<(), String> {
+    presets::delete_preset(&app_handle, &name).map_err(|e| e.to_string())
 }

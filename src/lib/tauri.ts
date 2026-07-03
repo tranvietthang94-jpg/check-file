@@ -12,6 +12,7 @@ import type {
 import type { GroupJobAddedEventPayload, TransferGroupMode } from "../types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/media";
 import type { OrganizeSettings } from "../types/organize";
+import type { Preset } from "../types/preset";
 
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
@@ -95,4 +96,16 @@ export function onMediaScanComplete(
   return listen<MediaScanCompletePayload>("media-scan-complete", (event) =>
     callback(event.payload),
   );
+}
+
+export function savePreset(preset: Preset): Promise<void> {
+  return invoke<void>("save_preset", { preset });
+}
+
+export function listPresets(): Promise<Preset[]> {
+  return invoke<Preset[]>("list_presets");
+}
+
+export function deletePreset(name: string): Promise<void> {
+  return invoke<void>("delete_preset", { name });
 }
