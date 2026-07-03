@@ -16,3 +16,18 @@ export function pathLabel(path: string): string {
   const segments = normalized.split("/");
   return segments[segments.length - 1] || path;
 }
+
+export function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = m.toString().padStart(h > 0 ? 2 : 1, "0");
+  const ss = s.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+export function formatFrameRate(fps: number): string {
+  const rounded = Math.round(fps * 100) / 100;
+  return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(2)} fps`;
+}

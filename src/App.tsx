@@ -7,21 +7,27 @@ import {
   onCopyProgress,
   onCopyScan,
   onDisksChanged,
+  onMediaScanComplete,
+  onMediaScanItem,
   onTransferGroupJobAdded,
+  startMediaScan,
   startTransferGroup,
 } from "./lib/tauri";
 import { useDisksStore } from "./state/disksStore";
 import { useTransfersStore } from "./state/transfersStore";
 import { useSettingsStore } from "./state/settingsStore";
 import { useGroupsStore } from "./state/groupsStore";
+import { useMediaStore } from "./state/mediaStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { GroupComposer } from "./components/GroupComposer";
+import { MediaBrowser } from "./components/MediaBrowser";
 import { pathLabel } from "./lib/format";
 import type { DiskInfo, Endpoint } from "./types/disk";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
+import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/media";
 import "./App.css";
 
 function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
@@ -51,6 +57,13 @@ function App() {
   const groups = useGroupsStore((s) => s.groups);
   const setGroupMeta = useGroupsStore((s) => s.setGroupMeta);
   const addJobToGroup = useGroupsStore((s) => s.addJobToGroup);
+
+  const mediaScans = useMediaStore((s) => s.scans);
+  const activeScanId = useMediaStore((s) => s.activeScanId);
+  const startMediaScanState = useMediaStore((s) => s.startScan);
+  const addMediaEntry = useMediaStore((s) => s.addEntry);
+  const completeMediaScan = useMediaStore((s) => s.completeScan);
+  const setActiveScan = useMediaStore((s) => s.setActiveScan);
 
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
@@ -93,12 +106,22 @@ function App() {
       });
     }
 
+    function handleMediaScanItem(payload: MediaScanItemPayload) {
+      addMediaEntry(payload.scanId, payload.entry);
+    }
+
+    function handleMediaScanComplete(payload: MediaScanCompletePayload) {
+      completeMediaScan(payload.scanId, payload.total);
+    }
+
     const unlistenPromises = [
       onCopyScan(applyScan),
       onCopyProgress(applyProgress),
       onCopyComplete(applyComplete),
       onCopyCancelled(applyCancelled),
       onTransferGroupJobAdded(handleGroupJobAdded),
+      onMediaScanItem(handleMediaScanItem),
+      onMediaScanComplete(handleMediaScanComplete),
     ];
 
     return () => {
@@ -111,6 +134,8 @@ function App() {
     applyCancelled,
     addJob,
     addJobToGroup,
+    addMediaEntry,
+    completeMediaScan,
     verificationMode,
     checksumAlgorithm,
   ]);
@@ -143,6 +168,13 @@ function App() {
     group.jobIds.forEach((jobId) => handleCancelJob(jobId));
   }
 
+  async function handleBrowse(endpoint: Endpoint) {
+    const scanId = await startMediaScan(endpoint.path);
+    startMediaScanState(scanId, endpoint.path);
+  }
+
+  const activeScan = activeScanId ? mediaScans[activeScanId] : undefined;
+
   return (
     <main className="min-h-screen bg-neutral-950 p-6 text-neutral-100">
       <h1 className="mb-6 text-xl font-semibold">OffloadKit</h1>
@@ -155,6 +187,7 @@ function App() {
           onRemove={removeSource}
           onLabelChange={setSourceLabel}
           onPathChange={setSourcePath}
+          onBrowse={handleBrowse}
         />
         <EndpointList
           title="Destinations"
@@ -179,6 +212,15 @@ function App() {
           onCancelJob={handleCancelJob}
           onCancelGroup={handleCancelGroup}
         />
+        {activeScan && (
+          <MediaBrowser
+            folder={activeScan.folder}
+            entries={activeScan.entries}
+            status={activeScan.status}
+            total={activeScan.total}
+            onClose={() => setActiveScan(null)}
+          />
+        )}
       </div>
     </main>
   );

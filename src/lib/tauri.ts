@@ -10,6 +10,7 @@ import type {
   VerificationMode,
 } from "../types/job";
 import type { GroupJobAddedEventPayload, TransferGroupMode } from "../types/transferGroup";
+import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/media";
 
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
@@ -71,4 +72,22 @@ export function onCopyCancelled(
   callback: (payload: CancelledEventPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<CancelledEventPayload>("copy-cancelled", (event) => callback(event.payload));
+}
+
+export function startMediaScan(folder: string): Promise<string> {
+  return invoke<string>("start_media_scan", { folder });
+}
+
+export function onMediaScanItem(
+  callback: (payload: MediaScanItemPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<MediaScanItemPayload>("media-scan-item", (event) => callback(event.payload));
+}
+
+export function onMediaScanComplete(
+  callback: (payload: MediaScanCompletePayload) => void,
+): Promise<UnlistenFn> {
+  return listen<MediaScanCompletePayload>("media-scan-complete", (event) =>
+    callback(event.payload),
+  );
 }

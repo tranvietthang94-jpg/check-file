@@ -6,6 +6,7 @@ use crate::cascade::{self, TransferGroupMode};
 use crate::checksum::ChecksumAlgorithm;
 use crate::copy_engine::{JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
+use crate::media_scan;
 
 #[tauri::command]
 pub fn list_disks() -> Vec<DiskInfo> {
@@ -34,4 +35,9 @@ pub fn start_transfer_group(
         verification_mode,
         checksum_algorithm,
     )
+}
+
+#[tauri::command]
+pub fn start_media_scan(app_handle: AppHandle, folder: String) -> String {
+    media_scan::start_media_scan(app_handle, PathBuf::from(folder))
 }

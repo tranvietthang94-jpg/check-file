@@ -7,6 +7,7 @@ interface EndpointListProps {
   onRemove: (diskId: string) => void;
   onLabelChange: (diskId: string, label: string) => void;
   onPathChange: (diskId: string, path: string) => void;
+  onBrowse?: (endpoint: Endpoint) => void;
 }
 
 export function EndpointList({
@@ -16,6 +17,7 @@ export function EndpointList({
   onRemove,
   onLabelChange,
   onPathChange,
+  onBrowse,
 }: EndpointListProps) {
   return (
     <section className="flex flex-col gap-2">
@@ -47,6 +49,15 @@ export function EndpointList({
                   autoComplete="off"
                   className="w-24 shrink-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
                 />
+                {onBrowse && (
+                  <button
+                    type="button"
+                    onClick={() => onBrowse(endpoint)}
+                    className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
+                  >
+                    Browse
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onRemove(endpoint.diskId)}

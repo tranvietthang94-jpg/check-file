@@ -4,6 +4,8 @@ mod commands;
 mod copy_engine;
 mod dedup;
 mod disks;
+mod media_scan;
+mod metadata;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,7 +19,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_disks,
             commands::cancel_copy,
-            commands::start_transfer_group
+            commands::start_transfer_group,
+            commands::start_media_scan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
