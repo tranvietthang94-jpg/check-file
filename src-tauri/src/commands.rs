@@ -10,6 +10,7 @@ use crate::eject;
 use crate::media_scan;
 use crate::organize::OrganizeSettings;
 use crate::presets::{self, Preset};
+use crate::queue::QueueMode;
 use crate::transfer_log::{self, TransferLogEntry};
 
 #[tauri::command]
@@ -79,4 +80,9 @@ pub fn eject_disk(mount_point: String) -> Result<(), String> {
 #[tauri::command]
 pub fn set_prevent_sleep(registry: State<JobRegistry>, enabled: bool) {
     registry.set_sleep_prevention_enabled(enabled);
+}
+
+#[tauri::command]
+pub fn set_queue_mode(registry: State<JobRegistry>, mode: QueueMode) {
+    registry.set_queue_mode(mode);
 }

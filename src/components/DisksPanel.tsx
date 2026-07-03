@@ -9,7 +9,7 @@ import type { TransferJob } from "../types/job";
 function isDiskBusy(disk: DiskInfo, jobs: TransferJob[]): boolean {
   return jobs.some(
     (job) =>
-      (job.status === "scanning" || job.status === "copying") &&
+      (job.status === "queued" || job.status === "copying") &&
       (job.sourcePath.startsWith(disk.mountPoint) ||
         job.destinationPath.startsWith(disk.mountPoint)),
   );

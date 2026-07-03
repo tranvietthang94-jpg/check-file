@@ -10,7 +10,7 @@ interface TransfersPanelProps {
 }
 
 const STATUS_COLOR: Record<TransferJob["status"], string> = {
-  scanning: "bg-neutral-500",
+  queued: "bg-neutral-500",
   copying: "bg-blue-500",
   complete: "bg-green-500",
   cancelled: "bg-orange-500",
@@ -22,7 +22,7 @@ const MODE_LABEL: Record<TransferGroup["mode"], string> = {
 };
 
 function isActive(job: TransferJob | undefined): boolean {
-  return !!job && (job.status === "scanning" || job.status === "copying");
+  return !!job && (job.status === "queued" || job.status === "copying");
 }
 
 function JobRow({ job, onCancel }: { job: TransferJob; onCancel: (jobId: string) => void }) {

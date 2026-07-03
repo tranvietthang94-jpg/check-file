@@ -1,5 +1,6 @@
 import { useSettingsStore } from "../state/settingsStore";
 import type { ChecksumAlgorithm, VerificationMode } from "../types/job";
+import type { QueueMode } from "../types/queue";
 
 const VERIFICATION_MODES: { value: VerificationMode; label: string; hint: string }[] = [
   { value: "transfer", label: "Transfer", hint: "Size check only, fastest" },
@@ -17,15 +18,32 @@ const ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
   { value: "sha1", label: "SHA-1" },
 ];
 
+const QUEUE_MODES: { value: QueueMode; label: string; hint: string }[] = [
+  { value: "off", label: "Off", hint: "Every transfer starts immediately" },
+  {
+    value: "singleSource",
+    label: "Single Source",
+    hint: "One source's destinations at a time; next source auto-starts",
+  },
+  {
+    value: "singleDestination",
+    label: "Single Destination",
+    hint: "One destination at a time per source",
+  },
+  { value: "singleTransfer", label: "Single Transfer", hint: "One job at a time, app-wide" },
+];
+
 export function SettingsPanel() {
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
   const preventSleep = useSettingsStore((s) => s.preventSleep);
   const desktopNotifications = useSettingsStore((s) => s.desktopNotifications);
+  const queueMode = useSettingsStore((s) => s.queueMode);
   const setVerificationMode = useSettingsStore((s) => s.setVerificationMode);
   const setChecksumAlgorithm = useSettingsStore((s) => s.setChecksumAlgorithm);
   const setPreventSleep = useSettingsStore((s) => s.setPreventSleep);
   const setDesktopNotifications = useSettingsStore((s) => s.setDesktopNotifications);
+  const setQueueMode = useSettingsStore((s) => s.setQueueMode);
 
   return (
     <section className="flex flex-col gap-2">
@@ -88,6 +106,30 @@ export function SettingsPanel() {
         />
         Desktop notifications
       </label>
+
+      <h2 className="mt-2 text-sm font-semibold uppercase tracking-wide text-neutral-400">
+        Queuing
+      </h2>
+      <div className="flex flex-col gap-1">
+        {QUEUE_MODES.map((m) => (
+          <label
+            key={m.value}
+            className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs"
+          >
+            <input
+              type="radio"
+              name="queue-mode"
+              checked={queueMode === m.value}
+              onChange={() => setQueueMode(m.value)}
+              className="mt-0.5"
+            />
+            <span className="flex flex-col">
+              <span className="font-medium">{m.label}</span>
+              <span className="text-neutral-500">{m.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
     </section>
   );
 }

@@ -126,7 +126,7 @@ function App() {
         destinationPath: payload.destination,
         verificationMode,
         checksumAlgorithm,
-        status: "scanning",
+        status: "queued",
         currentFile: "",
         bytesCopied: 0,
         totalBytes: 0,

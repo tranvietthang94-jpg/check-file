@@ -1,4 +1,4 @@
-export type JobStatus = "scanning" | "copying" | "complete" | "cancelled";
+export type JobStatus = "queued" | "copying" | "complete" | "cancelled";
 
 export type VerificationMode = "transfer" | "source" | "sourceAndDestination";
 export type ChecksumAlgorithm = "xxh64" | "md5" | "sha1";

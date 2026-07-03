@@ -69,7 +69,22 @@ fn spawn_job<R: Runtime>(
 
     let app_handle_thread = app_handle.clone();
     let job_id_thread = job_id.clone();
+    let group_id_thread = group_id.to_string();
     std::thread::spawn(move || {
+        let admitted = app_handle_thread
+            .state::<JobRegistry>()
+            .wait_for_turn(&job_id_thread, &group_id_thread, &cancel_flag);
+        if !admitted {
+            let _ = app_handle_thread.emit(
+                copy_engine::CANCELLED_EVENT,
+                copy_engine::CancelledPayload {
+                    job_id: job_id_thread.clone(),
+                },
+            );
+            app_handle_thread.state::<JobRegistry>().remove(&job_id_thread);
+            return;
+        }
+
         copy_engine::run_copy_job(
             app_handle_thread,
             job_id_thread,
@@ -143,8 +158,25 @@ pub fn start_transfer_group<R: Runtime>(
             let primary_thread = primary.clone();
             let source_name_thread = source_name.clone();
             let organize_thread = organize.clone();
+            let hop1_job_id_thread = hop1_job_id.clone();
 
             std::thread::spawn(move || {
+                let admitted = app_handle_thread.state::<JobRegistry>().wait_for_turn(
+                    &hop1_job_id_thread,
+                    &group_id_thread,
+                    &cancel_flag,
+                );
+                if !admitted {
+                    let _ = app_handle_thread.emit(
+                        copy_engine::CANCELLED_EVENT,
+                        copy_engine::CancelledPayload {
+                            job_id: hop1_job_id_thread.clone(),
+                        },
+                    );
+                    app_handle_thread.state::<JobRegistry>().remove(&hop1_job_id_thread);
+                    return;
+                }
+
                 let outcome = copy_engine::run_copy_job(
                     app_handle_thread.clone(),
                     hop1_job_id,

@@ -14,6 +14,7 @@ import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/me
 import type { OrganizeSettings } from "../types/organize";
 import type { Preset } from "../types/preset";
 import type { TransferLogEntry } from "../types/transferLog";
+import type { QueueMode } from "../types/queue";
 
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
@@ -121,4 +122,8 @@ export function ejectDisk(mountPoint: string): Promise<void> {
 
 export function setPreventSleepEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_prevent_sleep", { enabled });
+}
+
+export function setQueueMode(mode: QueueMode): Promise<void> {
+  return invoke<void>("set_queue_mode", { mode });
 }

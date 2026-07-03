@@ -149,12 +149,14 @@ pub trait ProgressSink {
     fn on_progress(&self, payload: ProgressPayload);
 }
 
-/// Tracks cancellation flags for in-flight copy jobs, keyed by job id, and
-/// keeps the system awake for as long as any of them are running.
+/// Tracks cancellation flags for in-flight copy jobs, keyed by job id,
+/// keeps the system awake for as long as any of them are running, and gates
+/// when each one's copy work may actually begin per the configured queue mode.
 #[derive(Default)]
 pub struct JobRegistry {
     cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
     sleep_guard: crate::power::SleepGuard,
+    job_queue: crate::queue::JobQueue,
 }
 
 impl JobRegistry {
@@ -170,6 +172,9 @@ impl JobRegistry {
         match self.cancel_flags.lock().unwrap().get(job_id) {
             Some(flag) => {
                 flag.store(true, Ordering::SeqCst);
+                // Wakes it immediately if it's still waiting in the queue,
+                // instead of only noticing the cancellation once admitted.
+                self.job_queue.notify_all();
                 true
             }
             None => false,
@@ -177,15 +182,26 @@ impl JobRegistry {
     }
 
     pub fn remove(&self, job_id: &str) {
-        // Only release sleep prevention for a job that genuinely existed --
-        // an unmatched call would decrement past zero.
+        // Only release sleep prevention/queue state for a job that
+        // genuinely existed -- an unmatched call would decrement past zero.
         if self.cancel_flags.lock().unwrap().remove(job_id).is_some() {
             self.sleep_guard.job_finished();
+            self.job_queue.job_finished(job_id);
         }
     }
 
     pub fn set_sleep_prevention_enabled(&self, enabled: bool) {
         self.sleep_guard.set_enabled(enabled);
+    }
+
+    pub fn set_queue_mode(&self, mode: crate::queue::QueueMode) {
+        self.job_queue.set_mode(mode);
+    }
+
+    /// Blocks until `job_id` (part of `group_id`) is allowed to start
+    /// copying, or returns `false` early if cancelled while still waiting.
+    pub fn wait_for_turn(&self, job_id: &str, group_id: &str, cancel_flag: &AtomicBool) -> bool {
+        self.job_queue.wait_for_turn(job_id, group_id, cancel_flag)
     }
 }
 
