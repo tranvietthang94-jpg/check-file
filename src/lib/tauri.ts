@@ -13,6 +13,7 @@ import type { GroupJobAddedEventPayload, TransferGroupMode } from "../types/tran
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/media";
 import type { OrganizeSettings } from "../types/organize";
 import type { Preset } from "../types/preset";
+import type { ReportRequest } from "../types/report";
 import type { TransferLogEntry } from "../types/transferLog";
 import type { QueueMode } from "../types/queue";
 
@@ -126,4 +127,9 @@ export function setPreventSleepEnabled(enabled: boolean): Promise<void> {
 
 export function setQueueMode(mode: QueueMode): Promise<void> {
   return invoke<void>("set_queue_mode", { mode });
+}
+
+/** Returns the absolute path to the generated report HTML file. */
+export function generateReport(request: ReportRequest): Promise<string> {
+  return invoke<string>("generate_report", { request });
 }

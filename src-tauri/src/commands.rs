@@ -11,6 +11,7 @@ use crate::media_scan;
 use crate::organize::OrganizeSettings;
 use crate::presets::{self, Preset};
 use crate::queue::QueueMode;
+use crate::reports::{self, ReportRequest};
 use crate::transfer_log::{self, TransferLogEntry};
 
 #[tauri::command]
@@ -85,4 +86,16 @@ pub fn set_prevent_sleep(registry: State<JobRegistry>, enabled: bool) {
 #[tauri::command]
 pub fn set_queue_mode(registry: State<JobRegistry>, mode: QueueMode) {
     registry.set_queue_mode(mode);
+}
+
+#[tauri::command]
+pub fn generate_report(app_handle: AppHandle, request: ReportRequest) -> Result<String, String> {
+    let all_logs = transfer_log::list_logs(&app_handle).map_err(|e| e.to_string())?;
+    let entries: Vec<TransferLogEntry> = request
+        .job_ids
+        .iter()
+        .filter_map(|id| all_logs.iter().find(|log| &log.job_id == id).cloned())
+        .collect();
+    let path = reports::save_report(&app_handle, &entries, &request).map_err(|e| e.to_string())?;
+    Ok(path.display().to_string())
 }

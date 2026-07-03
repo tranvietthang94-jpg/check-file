@@ -28,6 +28,7 @@ import { GroupComposer } from "./components/GroupComposer";
 import { MediaBrowser } from "./components/MediaBrowser";
 import { OrganizePanel } from "./components/OrganizePanel";
 import { PresetsPanel } from "./components/PresetsPanel";
+import { ReportsPanel } from "./components/ReportsPanel";
 import { TransferLogPanel } from "./components/TransferLogPanel";
 import { pathLabel, formatBytes } from "./lib/format";
 import { notifyTransfer } from "./lib/notify";
@@ -291,6 +292,7 @@ function App() {
           onCancelGroup={handleCancelGroup}
         />
         <TransferLogPanel onViewClips={handleBrowse} />
+        <ReportsPanel />
         {activeScan && (
           <MediaBrowser
             folder={activeScan.folder}

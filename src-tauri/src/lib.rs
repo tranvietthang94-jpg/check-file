@@ -12,6 +12,7 @@ mod organize;
 mod power;
 mod presets;
 mod queue;
+mod reports;
 mod transfer_log;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -35,7 +36,8 @@ pub fn run() {
             commands::list_transfer_logs,
             commands::eject_disk,
             commands::set_prevent_sleep,
-            commands::set_queue_mode
+            commands::set_queue_mode,
+            commands::generate_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
