@@ -1,43 +1,51 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect } from "react";
+import { listDisks, onDisksChanged } from "./lib/tauri";
+import { useDisksStore } from "./state/disksStore";
+import { DisksPanel } from "./components/DisksPanel";
+import { EndpointList } from "./components/EndpointList";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const disks = useDisksStore((s) => s.disks);
+  const sources = useDisksStore((s) => s.sources);
+  const destinations = useDisksStore((s) => s.destinations);
+  const setDisks = useDisksStore((s) => s.setDisks);
+  const removeSource = useDisksStore((s) => s.removeSource);
+  const removeDestination = useDisksStore((s) => s.removeDestination);
+  const setSourceLabel = useDisksStore((s) => s.setSourceLabel);
+  const setDestinationLabel = useDisksStore((s) => s.setDestinationLabel);
 
-  async function greet() {
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    listDisks().then(setDisks).catch(console.error);
+    onDisksChanged(setDisks).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => unlisten?.();
+  }, [setDisks]);
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-100">
-      <h1 className="text-2xl font-semibold">OffloadKit — scaffold OK</h1>
-      <p className="text-sm text-neutral-400">
-        Tauri + React + TypeScript + Tailwind CSS
-      </p>
-
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    <main className="min-h-screen bg-neutral-950 p-6 text-neutral-100">
+      <h1 className="mb-6 text-xl font-semibold">OffloadKit</h1>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+        <DisksPanel />
+        <EndpointList
+          title="Sources"
+          endpoints={sources}
+          disks={disks}
+          onRemove={removeSource}
+          onLabelChange={setSourceLabel}
         />
-        <button
-          type="submit"
-          className="rounded bg-neutral-100 px-3 py-1 text-neutral-900"
-        >
-          Greet (IPC smoke test)
-        </button>
-      </form>
-      <p>{greetMsg}</p>
+        <EndpointList
+          title="Destinations"
+          endpoints={destinations}
+          disks={disks}
+          onRemove={removeDestination}
+          onLabelChange={setDestinationLabel}
+        />
+      </div>
     </main>
   );
 }
