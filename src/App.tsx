@@ -7,16 +7,21 @@ import {
   onCopyProgress,
   onCopyScan,
   onDisksChanged,
-  startCopy,
+  onTransferGroupJobAdded,
+  startTransferGroup,
 } from "./lib/tauri";
 import { useDisksStore } from "./state/disksStore";
 import { useTransfersStore } from "./state/transfersStore";
 import { useSettingsStore } from "./state/settingsStore";
+import { useGroupsStore } from "./state/groupsStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { GroupComposer } from "./components/GroupComposer";
+import { pathLabel } from "./lib/format";
 import type { DiskInfo, Endpoint } from "./types/disk";
+import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
 import "./App.css";
 
 function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
@@ -43,6 +48,10 @@ function App() {
   const applyComplete = useTransfersStore((s) => s.applyComplete);
   const applyCancelled = useTransfersStore((s) => s.applyCancelled);
 
+  const groups = useGroupsStore((s) => s.groups);
+  const setGroupMeta = useGroupsStore((s) => s.setGroupMeta);
+  const addJobToGroup = useGroupsStore((s) => s.addJobToGroup);
+
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
 
@@ -58,49 +67,78 @@ function App() {
   }, [setDisks]);
 
   useEffect(() => {
+    function handleGroupJobAdded(payload: GroupJobAddedEventPayload) {
+      addJobToGroup(payload.groupId, payload.jobId);
+      addJob({
+        id: payload.jobId,
+        groupId: payload.groupId,
+        hop: payload.hop,
+        sourceLabel: pathLabel(payload.source),
+        destinationLabel: pathLabel(payload.destination),
+        sourcePath: payload.source,
+        destinationPath: payload.destination,
+        verificationMode,
+        checksumAlgorithm,
+        status: "scanning",
+        currentFile: "",
+        bytesCopied: 0,
+        totalBytes: 0,
+        filesCopied: 0,
+        totalFiles: 0,
+        bytesPerSec: 0,
+        failedFiles: [],
+        verifiedFiles: [],
+      });
+    }
+
     const unlistenPromises = [
       onCopyScan(applyScan),
       onCopyProgress(applyProgress),
       onCopyComplete(applyComplete),
       onCopyCancelled(applyCancelled),
+      onTransferGroupJobAdded(handleGroupJobAdded),
     ];
 
     return () => {
       unlistenPromises.forEach((p) => p.then((fn) => fn()));
     };
-  }, [applyScan, applyProgress, applyComplete, applyCancelled]);
+  }, [
+    applyScan,
+    applyProgress,
+    applyComplete,
+    applyCancelled,
+    addJob,
+    addJobToGroup,
+    verificationMode,
+    checksumAlgorithm,
+  ]);
 
-  async function handleStart(source: Endpoint, destination: Endpoint) {
-    const jobId = await startCopy(
+  async function handleStartGroup(
+    source: Endpoint,
+    destinationEndpoints: Endpoint[],
+    mode: TransferGroupMode,
+  ) {
+    const groupId = await startTransferGroup(
       source.path,
-      destination.path,
+      destinationEndpoints.map((d) => d.path),
+      mode,
       verificationMode,
       checksumAlgorithm,
     );
-    addJob({
-      id: jobId,
-      sourceDiskId: source.diskId,
-      destinationDiskId: destination.diskId,
-      sourceLabel: endpointLabel(source, disks),
-      destinationLabel: endpointLabel(destination, disks),
-      sourcePath: source.path,
-      destinationPath: destination.path,
-      verificationMode,
-      checksumAlgorithm,
-      status: "scanning",
-      currentFile: "",
-      bytesCopied: 0,
-      totalBytes: 0,
-      filesCopied: 0,
-      totalFiles: 0,
-      bytesPerSec: 0,
-      failedFiles: [],
-      verifiedFiles: [],
-    });
+    setGroupMeta(
+      groupId,
+      mode,
+      endpointLabel(source, disks),
+      destinationEndpoints.map((d) => endpointLabel(d, disks)),
+    );
   }
 
-  function handleCancel(jobId: string) {
+  function handleCancelJob(jobId: string) {
     cancelCopy(jobId).catch(console.error);
+  }
+
+  function handleCancelGroup(group: TransferGroup) {
+    group.jobIds.forEach((jobId) => handleCancelJob(jobId));
   }
 
   return (
@@ -124,14 +162,20 @@ function App() {
           onLabelChange={setDestinationLabel}
           onPathChange={setDestinationPath}
         />
-        <SettingsPanel />
+        <div className="flex flex-col gap-6">
+          <SettingsPanel />
+          <GroupComposer
+            sources={sources}
+            destinations={destinations}
+            disks={disks}
+            onStart={handleStartGroup}
+          />
+        </div>
         <TransfersPanel
-          sources={sources}
-          destinations={destinations}
-          disks={disks}
-          jobs={Object.values(jobs)}
-          onStart={handleStart}
-          onCancel={handleCancel}
+          groups={Object.values(groups)}
+          jobs={jobs}
+          onCancelJob={handleCancelJob}
+          onCancelGroup={handleCancelGroup}
         />
       </div>
     </main>

@@ -1,3 +1,4 @@
+mod cascade;
 mod checksum;
 mod commands;
 mod copy_engine;
@@ -14,8 +15,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_disks,
-            commands::start_copy,
-            commands::cancel_copy
+            commands::cancel_copy,
+            commands::start_transfer_group
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,3 +9,10 @@ export function formatBytes(bytes: number): string {
 export function formatSpeed(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
 }
+
+/** Last path segment, for a readable label when no disk/label metadata is available. */
+export function pathLabel(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const segments = normalized.split("/");
+  return segments[segments.length - 1] || path;
+}

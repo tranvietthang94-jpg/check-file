@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use tauri::{AppHandle, State};
-use uuid::Uuid;
 
+use crate::cascade::{self, TransferGroupMode};
 use crate::checksum::ChecksumAlgorithm;
-use crate::copy_engine::{self, JobRegistry, VerificationMode};
+use crate::copy_engine::{JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
 
 #[tauri::command]
@@ -13,37 +13,25 @@ pub fn list_disks() -> Vec<DiskInfo> {
 }
 
 #[tauri::command]
-pub fn start_copy(
-    app_handle: AppHandle,
-    registry: State<JobRegistry>,
-    source: String,
-    destination: String,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-) -> String {
-    let job_id = Uuid::new_v4().to_string();
-    let cancel_flag = registry.register(job_id.clone());
-
-    let source_path = PathBuf::from(source);
-    let dest_path = PathBuf::from(destination);
-    let job_id_for_thread = job_id.clone();
-
-    std::thread::spawn(move || {
-        copy_engine::run_copy_job(
-            app_handle,
-            job_id_for_thread,
-            source_path,
-            dest_path,
-            cancel_flag,
-            verification_mode,
-            checksum_algorithm,
-        );
-    });
-
-    job_id
+pub fn cancel_copy(registry: State<JobRegistry>, job_id: String) -> bool {
+    registry.cancel(&job_id)
 }
 
 #[tauri::command]
-pub fn cancel_copy(registry: State<JobRegistry>, job_id: String) -> bool {
-    registry.cancel(&job_id)
+pub fn start_transfer_group(
+    app_handle: AppHandle,
+    source: String,
+    destinations: Vec<String>,
+    mode: TransferGroupMode,
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
+) -> String {
+    cascade::start_transfer_group(
+        app_handle,
+        PathBuf::from(source),
+        destinations.into_iter().map(PathBuf::from).collect(),
+        mode,
+        verification_mode,
+        checksum_algorithm,
+    )
 }

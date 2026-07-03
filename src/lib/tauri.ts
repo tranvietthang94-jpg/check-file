@@ -9,6 +9,7 @@ import type {
   ScanEventPayload,
   VerificationMode,
 } from "../types/job";
+import type { GroupJobAddedEventPayload, TransferGroupMode } from "../types/transferGroup";
 
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
@@ -20,15 +21,17 @@ export function onDisksChanged(
   return listen<DiskInfo[]>("disks-changed", (event) => callback(event.payload));
 }
 
-export function startCopy(
+export function startTransferGroup(
   source: string,
-  destination: string,
+  destinations: string[],
+  mode: TransferGroupMode,
   verificationMode: VerificationMode,
   checksumAlgorithm: ChecksumAlgorithm,
 ): Promise<string> {
-  return invoke<string>("start_copy", {
+  return invoke<string>("start_transfer_group", {
     source,
-    destination,
+    destinations,
+    mode,
     verificationMode,
     checksumAlgorithm,
   });
@@ -36,6 +39,14 @@ export function startCopy(
 
 export function cancelCopy(jobId: string): Promise<boolean> {
   return invoke<boolean>("cancel_copy", { jobId });
+}
+
+export function onTransferGroupJobAdded(
+  callback: (payload: GroupJobAddedEventPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<GroupJobAddedEventPayload>("transfer-group-job-added", (event) =>
+    callback(event.payload),
+  );
 }
 
 export function onCopyScan(

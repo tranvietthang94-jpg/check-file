@@ -92,6 +92,7 @@ pub struct CancelledPayload {
 
 /// Result of a finished (or cancelled) copy job, Tauri-agnostic so it can be
 /// asserted on directly in unit tests.
+#[derive(Clone)]
 pub struct CopyOutcome {
     pub cancelled: bool,
     pub files_copied: u64,
@@ -430,7 +431,9 @@ impl<'a, R: Runtime> ProgressSink for TauriProgressSink<'a, R> {
 
 /// Runs a single source -> destination transfer to completion (or cancellation),
 /// emitting `copy-scan`, `copy-progress`, and a terminal `copy-complete` /
-/// `copy-cancelled` event. Intended to run on its own thread.
+/// `copy-cancelled` event. Intended to run on its own thread. Returns the
+/// outcome so callers orchestrating multiple jobs (e.g. cascading transfers)
+/// can decide whether to proceed based on how this one went.
 pub fn run_copy_job<R: Runtime>(
     app_handle: AppHandle<R>,
     job_id: String,
@@ -439,7 +442,7 @@ pub fn run_copy_job<R: Runtime>(
     cancel_flag: Arc<AtomicBool>,
     verification_mode: VerificationMode,
     checksum_algorithm: ChecksumAlgorithm,
-) {
+) -> CopyOutcome {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
         job_id: job_id.clone(),
@@ -468,13 +471,14 @@ pub fn run_copy_job<R: Runtime>(
                 job_id: job_id.clone(),
                 files_copied: outcome.files_copied,
                 bytes_copied: outcome.bytes_copied,
-                failed_files: outcome.failed_files,
-                verified_files: outcome.verified_files,
+                failed_files: outcome.failed_files.clone(),
+                verified_files: outcome.verified_files.clone(),
             },
         );
     }
 
     app_handle.state::<JobRegistry>().remove(&job_id);
+    outcome
 }
 
 #[cfg(test)]

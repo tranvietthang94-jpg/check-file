@@ -16,8 +16,9 @@ export interface VerifiedFile {
 
 export interface TransferJob {
   id: string;
-  sourceDiskId: string;
-  destinationDiskId: string;
+  groupId: string;
+  /** 1 = copies from the original source. 2 = relayed from a cascade's primary destination. */
+  hop: 1 | 2;
   sourceLabel: string;
   destinationLabel: string;
   sourcePath: string;
