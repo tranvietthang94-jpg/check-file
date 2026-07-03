@@ -1,8 +1,17 @@
 export type JobStatus = "scanning" | "copying" | "complete" | "cancelled";
 
+export type VerificationMode = "transfer" | "source" | "sourceAndDestination";
+export type ChecksumAlgorithm = "xxh64" | "md5" | "sha1";
+
 export interface FailedFile {
   path: string;
   message: string;
+}
+
+export interface VerifiedFile {
+  path: string;
+  checksum: string;
+  algorithm: ChecksumAlgorithm;
 }
 
 export interface TransferJob {
@@ -13,6 +22,8 @@ export interface TransferJob {
   destinationLabel: string;
   sourcePath: string;
   destinationPath: string;
+  verificationMode: VerificationMode;
+  checksumAlgorithm: ChecksumAlgorithm;
   status: JobStatus;
   currentFile: string;
   bytesCopied: number;
@@ -21,6 +32,7 @@ export interface TransferJob {
   totalFiles: number;
   bytesPerSec: number;
   failedFiles: FailedFile[];
+  verifiedFiles: VerifiedFile[];
 }
 
 export interface ScanEventPayload {
@@ -44,6 +56,7 @@ export interface CompleteEventPayload {
   filesCopied: number;
   bytesCopied: number;
   failedFiles: FailedFile[];
+  verifiedFiles: VerifiedFile[];
 }
 
 export interface CancelledEventPayload {

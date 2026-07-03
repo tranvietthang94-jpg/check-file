@@ -1,3 +1,4 @@
+mod checksum;
 mod commands;
 mod copy_engine;
 mod disks;

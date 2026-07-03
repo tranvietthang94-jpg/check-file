@@ -3,9 +3,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DiskInfo } from "../types/disk";
 import type {
   CancelledEventPayload,
+  ChecksumAlgorithm,
   CompleteEventPayload,
   ProgressEventPayload,
   ScanEventPayload,
+  VerificationMode,
 } from "../types/job";
 
 export function listDisks(): Promise<DiskInfo[]> {
@@ -18,8 +20,18 @@ export function onDisksChanged(
   return listen<DiskInfo[]>("disks-changed", (event) => callback(event.payload));
 }
 
-export function startCopy(source: string, destination: string): Promise<string> {
-  return invoke<string>("start_copy", { source, destination });
+export function startCopy(
+  source: string,
+  destination: string,
+  verificationMode: VerificationMode,
+  checksumAlgorithm: ChecksumAlgorithm,
+): Promise<string> {
+  return invoke<string>("start_copy", {
+    source,
+    destination,
+    verificationMode,
+    checksumAlgorithm,
+  });
 }
 
 export function cancelCopy(jobId: string): Promise<boolean> {

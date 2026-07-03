@@ -1,0 +1,71 @@
+import { useSettingsStore } from "../state/settingsStore";
+import type { ChecksumAlgorithm, VerificationMode } from "../types/job";
+
+const VERIFICATION_MODES: { value: VerificationMode; label: string; hint: string }[] = [
+  { value: "transfer", label: "Transfer", hint: "Size check only, fastest" },
+  { value: "source", label: "Source", hint: "Hash source while copying" },
+  {
+    value: "sourceAndDestination",
+    label: "Source & Destination",
+    hint: "Hash both, compare (safest)",
+  },
+];
+
+const ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
+  { value: "xxh64", label: "XXH64" },
+  { value: "md5", label: "MD5" },
+  { value: "sha1", label: "SHA-1" },
+];
+
+export function SettingsPanel() {
+  const verificationMode = useSettingsStore((s) => s.verificationMode);
+  const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
+  const setVerificationMode = useSettingsStore((s) => s.setVerificationMode);
+  const setChecksumAlgorithm = useSettingsStore((s) => s.setChecksumAlgorithm);
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
+        Verification
+      </h2>
+      <div className="flex flex-col gap-1">
+        {VERIFICATION_MODES.map((m) => (
+          <label
+            key={m.value}
+            className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs"
+          >
+            <input
+              type="radio"
+              name="verification-mode"
+              checked={verificationMode === m.value}
+              onChange={() => setVerificationMode(m.value)}
+              className="mt-0.5"
+            />
+            <span className="flex flex-col">
+              <span className="font-medium">{m.label}</span>
+              <span className="text-neutral-500">{m.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+          Checksum algorithm
+        </span>
+        <select
+          value={checksumAlgorithm}
+          onChange={(e) => setChecksumAlgorithm(e.currentTarget.value as ChecksumAlgorithm)}
+          disabled={verificationMode === "transfer"}
+          className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 disabled:opacity-40"
+        >
+          {ALGORITHMS.map((a) => (
+            <option key={a.value} value={a.value}>
+              {a.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}

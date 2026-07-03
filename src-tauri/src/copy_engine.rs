@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
@@ -9,6 +9,27 @@ use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use walkdir::WalkDir;
+
+use crate::checksum::{self, ChecksumAlgorithm, StreamingHasher};
+
+/// How thoroughly a transfer is checked for integrity.
+/// - `Transfer`: no hashing, relies on the OS copy completing without an I/O error.
+/// - `Source`: hash the source while streaming it (no extra read pass) and record it.
+/// - `SourceAndDestination`: additionally re-reads the destination afterwards and
+///   compares its hash to the source hash, catching corruption introduced during write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VerificationMode {
+    Transfer,
+    Source,
+    SourceAndDestination,
+}
+
+impl Default for VerificationMode {
+    fn default() -> Self {
+        VerificationMode::SourceAndDestination
+    }
+}
 
 pub const SCAN_EVENT: &str = "copy-scan";
 pub const PROGRESS_EVENT: &str = "copy-progress";
@@ -39,6 +60,14 @@ pub struct FailedFile {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct VerifiedFile {
+    pub path: String,
+    pub checksum: String,
+    pub algorithm: ChecksumAlgorithm,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ScanPayload {
     pub job_id: String,
     pub total_files: u64,
@@ -52,6 +81,7 @@ pub struct CompletePayload {
     pub files_copied: u64,
     pub bytes_copied: u64,
     pub failed_files: Vec<FailedFile>,
+    pub verified_files: Vec<VerifiedFile>,
 }
 
 #[derive(Serialize, Clone)]
@@ -67,6 +97,7 @@ pub struct CopyOutcome {
     pub files_copied: u64,
     pub bytes_copied: u64,
     pub failed_files: Vec<FailedFile>,
+    pub verified_files: Vec<VerifiedFile>,
 }
 
 /// Destination for scan/progress notifications. Kept separate from Tauri so
@@ -202,10 +233,19 @@ fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
     Ok(entries)
 }
 
+/// Outcome of copying a single file.
+enum CopyFileOutcome {
+    Cancelled,
+    /// `source_hash` is `Some` only when verification requested it (Transfer
+    /// mode skips hashing entirely to stay as fast as a plain OS copy).
+    Completed { source_hash: Option<String> },
+}
+
 /// Copies one file in fixed-size chunks (streaming, not loaded fully into RAM),
-/// checking the cancel flag between chunks. Returns Ok(false) if cancelled
-/// mid-file, in which case the partial destination file is removed so it
-/// can never be mistaken for a completed copy.
+/// checking the cancel flag between chunks and optionally hashing the source
+/// bytes as they're read (no extra I/O pass). Returns `Cancelled` if cancelled
+/// mid-file, in which case the partial destination file is removed so it can
+/// never be mistaken for a completed copy.
 fn copy_file_chunked(
     src: &Path,
     dst: &Path,
@@ -213,24 +253,33 @@ fn copy_file_chunked(
     cancel_flag: &AtomicBool,
     tracker: &mut ProgressTracker,
     relative_display: &str,
-) -> std::io::Result<bool> {
+    checksum_algorithm: ChecksumAlgorithm,
+    compute_hash: bool,
+) -> std::io::Result<CopyFileOutcome> {
     let mut src_file = fs::File::open(src)?;
     let mut dst_file = fs::File::create(dst)?;
+    let mut hasher = compute_hash.then(|| StreamingHasher::new(checksum_algorithm));
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
             drop(dst_file);
             let _ = fs::remove_file(dst);
-            return Ok(false);
+            return Ok(CopyFileOutcome::Cancelled);
         }
         let n = src_file.read(buffer)?;
         if n == 0 {
             break;
         }
         dst_file.write_all(&buffer[..n])?;
+        if let Some(h) = hasher.as_mut() {
+            h.update(&buffer[..n]);
+        }
         tracker.add_bytes(n as u64, relative_display);
     }
-    Ok(true)
+
+    Ok(CopyFileOutcome::Completed {
+        source_hash: hasher.map(|h| h.finalize_hex()),
+    })
 }
 
 /// Tauri-agnostic copy core: walks `source`, streams every file to the mirrored
@@ -242,6 +291,8 @@ pub fn run_copy_core(
     source: &Path,
     destination: &Path,
     cancel_flag: &AtomicBool,
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
 ) -> CopyOutcome {
     let entries = match scan_source(source) {
         Ok(e) => e,
@@ -254,6 +305,7 @@ pub fn run_copy_core(
                     path: source.display().to_string(),
                     message: err.to_string(),
                 }],
+                verified_files: Vec::new(),
             };
         }
     };
@@ -262,9 +314,11 @@ pub fn run_copy_core(
     let total_bytes: u64 = entries.iter().map(|e| e.size).sum();
     sink.on_scan(total_files, total_bytes);
 
+    let compute_hash = verification_mode != VerificationMode::Transfer;
     let mut tracker = ProgressTracker::new(sink, job_id, total_bytes, total_files);
     let mut buffer = vec![0u8; CHUNK_SIZE];
     let mut failed_files = Vec::new();
+    let mut verified_files = Vec::new();
     let mut cancelled = false;
 
     for entry in &entries {
@@ -292,9 +346,43 @@ pub fn run_copy_core(
             cancel_flag,
             &mut tracker,
             &relative_display,
+            checksum_algorithm,
+            compute_hash,
         ) {
-            Ok(true) => tracker.finish_file(),
-            Ok(false) => {
+            Ok(CopyFileOutcome::Completed { source_hash }) => {
+                tracker.finish_file();
+                if let Some(hash) = source_hash {
+                    if verification_mode == VerificationMode::SourceAndDestination {
+                        match checksum::verify_file_hash(&dest_path, &hash, checksum_algorithm) {
+                            Ok(true) => verified_files.push(VerifiedFile {
+                                path: relative_display,
+                                checksum: hash,
+                                algorithm: checksum_algorithm,
+                            }),
+                            Ok(false) => failed_files.push(FailedFile {
+                                path: relative_display,
+                                message:
+                                    "checksum mismatch: source and destination differ after copy"
+                                        .to_string(),
+                            }),
+                            Err(err) => failed_files.push(FailedFile {
+                                path: relative_display,
+                                message: format!(
+                                    "could not re-read destination for verification: {err}"
+                                ),
+                            }),
+                        }
+                    } else {
+                        // Source-only mode: nothing to compare against yet, just record it.
+                        verified_files.push(VerifiedFile {
+                            path: relative_display,
+                            checksum: hash,
+                            algorithm: checksum_algorithm,
+                        });
+                    }
+                }
+            }
+            Ok(CopyFileOutcome::Cancelled) => {
                 cancelled = true;
                 break;
             }
@@ -314,6 +402,7 @@ pub fn run_copy_core(
         files_copied: tracker.files_copied,
         bytes_copied: tracker.bytes_copied,
         failed_files,
+        verified_files,
     }
 }
 
@@ -348,12 +437,22 @@ pub fn run_copy_job<R: Runtime>(
     source: PathBuf,
     destination: PathBuf,
     cancel_flag: Arc<AtomicBool>,
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
 ) {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
         job_id: job_id.clone(),
     };
-    let outcome = run_copy_core(&sink, job_id.clone(), &source, &destination, &cancel_flag);
+    let outcome = run_copy_core(
+        &sink,
+        job_id.clone(),
+        &source,
+        &destination,
+        &cancel_flag,
+        verification_mode,
+        checksum_algorithm,
+    );
 
     if outcome.cancelled {
         let _ = app_handle.emit(
@@ -370,6 +469,7 @@ pub fn run_copy_job<R: Runtime>(
                 files_copied: outcome.files_copied,
                 bytes_copied: outcome.bytes_copied,
                 failed_files: outcome.failed_files,
+                verified_files: outcome.verified_files,
             },
         );
     }
@@ -403,6 +503,8 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
         );
 
         assert!(!outcome.cancelled);
@@ -432,6 +534,8 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
         );
 
         assert!(outcome.cancelled);
@@ -449,6 +553,8 @@ mod tests {
             Path::new("Z:\\this\\path\\does\\not\\exist"),
             dst_dir.path(),
             &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
         );
 
         assert_eq!(outcome.files_copied, 0);
@@ -481,11 +587,91 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
         );
 
         // The final flush always emits at least one progress event.
         let calls = sink.calls.lock().unwrap();
         assert!(!calls.is_empty());
         assert_eq!(*calls.last().unwrap(), 200);
+    }
+
+    #[test]
+    fn transfer_mode_skips_hashing() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("a.txt"), b"hello").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-transfer".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+        );
+
+        assert!(!outcome.cancelled);
+        assert!(outcome.failed_files.is_empty());
+        assert!(
+            outcome.verified_files.is_empty(),
+            "Transfer mode must not compute checksums"
+        );
+    }
+
+    #[test]
+    fn source_mode_records_checksum_without_rereading_destination() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("a.txt"), b"hello").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-source".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Source,
+            ChecksumAlgorithm::Xxh64,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(outcome.verified_files.len(), 1);
+        assert_eq!(outcome.verified_files[0].path, "a.txt");
+        assert_eq!(
+            outcome.verified_files[0].checksum,
+            checksum::hash_file(&src_dir.path().join("a.txt"), ChecksumAlgorithm::Xxh64).unwrap()
+        );
+    }
+
+    #[test]
+    fn source_and_destination_mode_verifies_successful_copy() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("a.txt"), vec![42u8; 10_000]).unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-verify".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Md5,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(outcome.verified_files.len(), 1);
+        assert_eq!(outcome.verified_files[0].algorithm, ChecksumAlgorithm::Md5);
+        // Confirms the recorded checksum really is the destination's checksum,
+        // not just an unchecked copy of whatever the source hasher produced.
+        let dest_hash =
+            checksum::hash_file(&dst_dir.path().join("a.txt"), ChecksumAlgorithm::Md5).unwrap();
+        assert_eq!(outcome.verified_files[0].checksum, dest_hash);
     }
 }

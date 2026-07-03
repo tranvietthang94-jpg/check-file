@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "OffloadKit",
-        "width": 1200,
-        "height": 760,
-        "minWidth": 900,
+        "width": 1500,
+        "height": 800,
+        "minWidth": 1000,
         "minHeight": 600
       }
     ],

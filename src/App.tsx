@@ -11,9 +11,11 @@ import {
 } from "./lib/tauri";
 import { useDisksStore } from "./state/disksStore";
 import { useTransfersStore } from "./state/transfersStore";
+import { useSettingsStore } from "./state/settingsStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import type { DiskInfo, Endpoint } from "./types/disk";
 import "./App.css";
 
@@ -41,6 +43,9 @@ function App() {
   const applyComplete = useTransfersStore((s) => s.applyComplete);
   const applyCancelled = useTransfersStore((s) => s.applyCancelled);
 
+  const verificationMode = useSettingsStore((s) => s.verificationMode);
+  const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
+
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
@@ -66,7 +71,12 @@ function App() {
   }, [applyScan, applyProgress, applyComplete, applyCancelled]);
 
   async function handleStart(source: Endpoint, destination: Endpoint) {
-    const jobId = await startCopy(source.path, destination.path);
+    const jobId = await startCopy(
+      source.path,
+      destination.path,
+      verificationMode,
+      checksumAlgorithm,
+    );
     addJob({
       id: jobId,
       sourceDiskId: source.diskId,
@@ -75,6 +85,8 @@ function App() {
       destinationLabel: endpointLabel(destination, disks),
       sourcePath: source.path,
       destinationPath: destination.path,
+      verificationMode,
+      checksumAlgorithm,
       status: "scanning",
       currentFile: "",
       bytesCopied: 0,
@@ -83,6 +95,7 @@ function App() {
       totalFiles: 0,
       bytesPerSec: 0,
       failedFiles: [],
+      verifiedFiles: [],
     });
   }
 
@@ -93,7 +106,7 @@ function App() {
   return (
     <main className="min-h-screen bg-neutral-950 p-6 text-neutral-100">
       <h1 className="mb-6 text-xl font-semibold">OffloadKit</h1>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-5">
         <DisksPanel />
         <EndpointList
           title="Sources"
@@ -111,6 +124,7 @@ function App() {
           onLabelChange={setDestinationLabel}
           onPathChange={setDestinationPath}
         />
+        <SettingsPanel />
         <TransfersPanel
           sources={sources}
           destinations={destinations}

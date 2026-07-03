@@ -23,6 +23,12 @@ const STATUS_COLOR: Record<TransferJob["status"], string> = {
   cancelled: "bg-orange-500",
 };
 
+const VERIFICATION_LABEL: Record<TransferJob["verificationMode"], string> = {
+  transfer: "Transfer",
+  source: "Source",
+  sourceAndDestination: "Source & Destination",
+};
+
 export function TransfersPanel({
   sources,
   destinations,
@@ -88,6 +94,12 @@ export function TransfersPanel({
                   <span className="truncate text-sm">
                     {job.sourceLabel} <span className="text-neutral-500">→</span>{" "}
                     {job.destinationLabel}
+                    <span className="ml-2 text-[10px] uppercase tracking-wide text-neutral-500">
+                      {VERIFICATION_LABEL[job.verificationMode]}
+                      {job.verificationMode !== "transfer"
+                        ? ` · ${job.checksumAlgorithm.toUpperCase()}`
+                        : ""}
+                    </span>
                   </span>
                   {job.status === "copying" || job.status === "scanning" ? (
                     <button
@@ -119,9 +131,17 @@ export function TransfersPanel({
                   </span>
                 </div>
 
+                {job.verifiedFiles.length > 0 && (
+                  <p className="text-xs text-green-500">
+                    {job.verificationMode === "sourceAndDestination"
+                      ? `${job.verifiedFiles.length} file(s) verified (source = destination, `
+                      : `${job.verifiedFiles.length} file(s) hashed (`}
+                    {job.verifiedFiles[0].algorithm.toUpperCase()})
+                  </p>
+                )}
                 {job.failedFiles.length > 0 && (
-                  <p className="text-xs text-red-400">
-                    {job.failedFiles.length} file(s) failed
+                  <p className="text-xs text-red-400" title={job.failedFiles[0].message}>
+                    {job.failedFiles.length} file(s) failed — {job.failedFiles[0].message}
                   </p>
                 )}
               </li>

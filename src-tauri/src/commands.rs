@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::copy_engine::{self, JobRegistry};
+use crate::checksum::ChecksumAlgorithm;
+use crate::copy_engine::{self, JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
 
 #[tauri::command]
@@ -17,6 +18,8 @@ pub fn start_copy(
     registry: State<JobRegistry>,
     source: String,
     destination: String,
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
 ) -> String {
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = registry.register(job_id.clone());
@@ -32,6 +35,8 @@ pub fn start_copy(
             source_path,
             dest_path,
             cancel_flag,
+            verification_mode,
+            checksum_algorithm,
         );
     });
 
