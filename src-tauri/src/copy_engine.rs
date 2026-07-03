@@ -464,6 +464,7 @@ pub fn run_copy_core(
             file_extension,
             file_modified: entry.modified,
             content_oldest,
+            elements: organize.elements.clone(),
         };
         let organized_relative = organize::build_destination_path(&entry.relative, &ctx, organize);
 

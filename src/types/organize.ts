@@ -20,6 +20,13 @@ export interface DateTimeOverride {
   rolloverAt4am: boolean;
 }
 
+/** A user-defined custom token (e.g. `{Location}`) -- OffShoot calls these "Elements". */
+export interface ElementDefinition {
+  /** Token name without braces, e.g. `"Location"` for `{Location}`. */
+  name: string;
+  value: string;
+}
+
 export interface OrganizeSettings {
   renameTemplate: string | null;
   folderTemplate: string | null;
@@ -30,6 +37,7 @@ export interface OrganizeSettings {
   flatten: boolean;
   contentDateExcludedExtensions: string[];
   dateOverride: DateTimeOverride;
+  elements: ElementDefinition[];
 }
 
 export function defaultOrganizeSettings(): OrganizeSettings {
@@ -43,5 +51,6 @@ export function defaultOrganizeSettings(): OrganizeSettings {
     flatten: false,
     contentDateExcludedExtensions: [],
     dateOverride: { mode: "automatic", manualDate: null, rolloverAt4am: false },
+    elements: [],
   };
 }

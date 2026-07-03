@@ -1,4 +1,4 @@
-import type { DateTimeOverride, OrganizeSettings } from "../types/organize";
+import type { DateTimeOverride, ElementDefinition, OrganizeSettings } from "../types/organize";
 
 /**
  * Display-only mirror of src-tauri/src/organize.rs's token engine, used for
@@ -15,6 +15,7 @@ export interface TokenPreviewContext {
   jobStarted: Date;
   /** Stands in for per-file and content-oldest timestamps alike. */
   now: Date;
+  elements: ElementDefinition[];
 }
 
 /**
@@ -68,6 +69,9 @@ export function renderTemplate(template: string, ctx: TokenPreviewContext): stri
     ...dateTokens("", ctx.jobStarted),
     ...dateTokens("File ", ctx.now),
     ...dateTokens("Content ", ctx.now),
+    ...ctx.elements
+      .filter((e) => e.name.trim() !== "")
+      .map((e): [string, string] => [`{${e.name.trim()}}`, e.value]),
   ];
 
   let rendered = template;

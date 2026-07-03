@@ -88,6 +88,7 @@ function App() {
     (s) => s.contentDateExcludedExtensions,
   );
   const organizeDateOverride = useOrganizeStore((s) => s.dateOverride);
+  const organizeElements = useOrganizeStore((s) => s.elements);
   // Assembled fresh each render from the primitive selections above --
   // deliberately not itself a selector return value, since Zustand's
   // useSyncExternalStore compares each render's snapshot by reference and a
@@ -102,6 +103,7 @@ function App() {
     flatten: organizeFlatten,
     contentDateExcludedExtensions: organizeContentDateExcludedExtensions,
     dateOverride: organizeDateOverride,
+    elements: organizeElements,
   };
 
   useEffect(() => {

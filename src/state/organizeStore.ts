@@ -20,6 +20,12 @@ interface OrganizeState extends OrganizeSettings {
   setDateOverrideMode: (mode: DateOverrideMode) => void;
   setManualDate: (date: string | null) => void;
   setRolloverAt4am: (value: boolean) => void;
+  /** Adds a new element definition; ignores blank or case-insensitively duplicate names. */
+  addElement: (name: string) => void;
+  removeElement: (name: string) => void;
+  setElementValue: (name: string, value: string) => void;
+  /** Resets every element's value to "" but keeps the definitions -- mirrors OffShoot's "Clear". */
+  clearElementValues: () => void;
   /** Replaces every field at once -- used when applying a loaded preset. */
   loadSettings: (settings: OrganizeSettings) => void;
 }
@@ -51,5 +57,23 @@ export const useOrganizeStore = create<OrganizeState>((set) => ({
     set((state) => ({ dateOverride: { ...state.dateOverride, manualDate } })),
   setRolloverAt4am: (rolloverAt4am) =>
     set((state) => ({ dateOverride: { ...state.dateOverride, rolloverAt4am } })),
+  addElement: (name) =>
+    set((state) => {
+      const trimmed = name.trim();
+      if (trimmed === "") return state;
+      const exists = state.elements.some(
+        (e) => e.name.toLowerCase() === trimmed.toLowerCase(),
+      );
+      if (exists) return state;
+      return { elements: [...state.elements, { name: trimmed, value: "" }] };
+    }),
+  removeElement: (name) =>
+    set((state) => ({ elements: state.elements.filter((e) => e.name !== name) })),
+  setElementValue: (name, value) =>
+    set((state) => ({
+      elements: state.elements.map((e) => (e.name === name ? { ...e, value } : e)),
+    })),
+  clearElementValues: () =>
+    set((state) => ({ elements: state.elements.map((e) => ({ ...e, value: "" })) })),
   loadSettings: (settings) => set({ ...settings }),
 }));

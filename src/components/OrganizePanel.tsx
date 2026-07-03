@@ -34,6 +34,7 @@ export function OrganizePanel() {
   const flatten = useOrganizeStore((s) => s.flatten);
   const contentDateExcludedExtensions = useOrganizeStore((s) => s.contentDateExcludedExtensions);
   const dateOverride = useOrganizeStore((s) => s.dateOverride);
+  const elements = useOrganizeStore((s) => s.elements);
 
   const setRenameTemplate = useOrganizeStore((s) => s.setRenameTemplate);
   const setFolderTemplate = useOrganizeStore((s) => s.setFolderTemplate);
@@ -47,6 +48,10 @@ export function OrganizePanel() {
   const setDateOverrideMode = useOrganizeStore((s) => s.setDateOverrideMode);
   const setManualDate = useOrganizeStore((s) => s.setManualDate);
   const setRolloverAt4am = useOrganizeStore((s) => s.setRolloverAt4am);
+  const addElement = useOrganizeStore((s) => s.addElement);
+  const removeElement = useOrganizeStore((s) => s.removeElement);
+  const setElementValue = useOrganizeStore((s) => s.setElementValue);
+  const clearElementValues = useOrganizeStore((s) => s.clearElementValues);
 
   const [patternsText, setPatternsText] = useState(selectiveCopy.patterns.join(", "));
   const [excludedExtText, setExcludedExtText] = useState(
@@ -57,6 +62,13 @@ export function OrganizePanel() {
   const [bundleMaxMb, setBundleMaxMb] = useState(
     bundleIgnore ? (bundleIgnore.maxSizeBytes / (1024 * 1024)).toString() : "50",
   );
+  const [newElementName, setNewElementName] = useState("");
+
+  function commitNewElement() {
+    if (newElementName.trim() === "") return;
+    addElement(newElementName);
+    setNewElementName("");
+  }
 
   function commitBundle(enabled: boolean, name: string, maxMb: string) {
     if (!enabled || name.trim() === "") {
@@ -81,8 +93,14 @@ export function OrganizePanel() {
       flatten,
       contentDateExcludedExtensions,
       dateOverride,
+      elements,
     },
-    { ...PREVIEW_CONTEXT, counterPadding, jobStarted: effectiveJobDate(NOW, dateOverride) },
+    {
+      ...PREVIEW_CONTEXT,
+      counterPadding,
+      jobStarted: effectiveJobDate(NOW, dateOverride),
+      elements,
+    },
   );
 
   return (
@@ -290,6 +308,72 @@ export function OrganizePanel() {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+            Elements (custom tokens)
+          </span>
+          {elements.length > 0 && (
+            <button
+              type="button"
+              onClick={clearElementValues}
+              className="text-[10px] uppercase tracking-wide text-neutral-500 hover:text-neutral-300"
+            >
+              Clear values
+            </button>
+          )}
+        </div>
+
+        {elements.map((element) => (
+          <div key={element.name} className="flex items-center gap-2">
+            <span
+              className="w-28 shrink-0 truncate font-mono text-xs text-neutral-400"
+              title={`{${element.name}}`}
+            >
+              {`{${element.name}}`}
+            </span>
+            <input
+              value={element.value}
+              onChange={(e) => setElementValue(element.name, e.currentTarget.value)}
+              placeholder="Value for this job…"
+              autoComplete="off"
+              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => removeElement(element.name)}
+              title={`Remove {${element.name}}`}
+              className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+
+        <div className="flex gap-2">
+          <input
+            value={newElementName}
+            onChange={(e) => setNewElementName(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitNewElement();
+            }}
+            placeholder="New element name (e.g. Location)…"
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+          />
+          <button
+            type="button"
+            onClick={commitNewElement}
+            className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
+          >
+            + Add
+          </button>
+        </div>
+        <p className="text-[10px] leading-relaxed text-neutral-600">
+          Type the token (e.g. {"{Location}"}) into a Rename or Folder template above to use it.
+        </p>
       </div>
     </section>
   );

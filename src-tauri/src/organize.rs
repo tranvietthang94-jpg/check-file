@@ -143,6 +143,11 @@ pub struct OrganizeSettings {
     /// still load, falling back to "follow the system clock".
     #[serde(default)]
     pub date_override: DateTimeOverride,
+    /// User-defined custom tokens ("Elements") usable in the rename/folder
+    /// templates, on top of the built-in ones. `#[serde(default)]` so
+    /// presets saved before this field existed still load.
+    #[serde(default)]
+    pub elements: Vec<ElementDefinition>,
 }
 
 impl Default for OrganizeSettings {
@@ -157,8 +162,22 @@ impl Default for OrganizeSettings {
             flatten: false,
             content_date_excluded_extensions: Vec::new(),
             date_override: DateTimeOverride::default(),
+            elements: Vec::new(),
         }
     }
+}
+
+/// A user-defined custom token (e.g. `{Location}`, `{Project}`) with the
+/// value to substitute for it in this job's rename/folder templates --
+/// OffShoot calls these "Elements". Unlike the built-in tokens, both the
+/// name and value are entered by the user rather than derived from the file
+/// or job.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementDefinition {
+    /// Token name without braces, e.g. `"Location"` for `{Location}`.
+    pub name: String,
+    pub value: String,
 }
 
 /// Values available to the token engine while rendering one file's rename
@@ -175,6 +194,8 @@ pub struct TokenContext {
     /// (after excluded extensions), used by `{Content *}` tokens. Falls back
     /// to `job_started` when there's nothing to compute it from.
     pub content_oldest: Option<SystemTime>,
+    /// User-defined custom tokens for this job. Same for every file.
+    pub elements: Vec<ElementDefinition>,
 }
 
 fn pad(n: u32, width: u8) -> String {
@@ -217,6 +238,13 @@ pub fn render_template(template: &str, ctx: &TokenContext) -> String {
         "Content ",
         ctx.content_oldest.unwrap_or(ctx.job_started),
     ));
+    for element in &ctx.elements {
+        let name = element.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        tokens.push((format!("{{{name}}}"), element.value.clone()));
+    }
 
     let mut rendered = template.to_string();
     for (token, value) in tokens {
@@ -403,6 +431,7 @@ mod tests {
             file_extension: "MP4".to_string(),
             file_modified: local_time(2020, 9, 2, 8, 0, 0),
             content_oldest: None,
+            elements: Vec::new(),
         };
         overrides(&mut ctx);
         ctx
@@ -428,6 +457,42 @@ mod tests {
             c.counter_padding = 2;
         }));
         assert_eq!(rendered, "00007");
+    }
+
+    #[test]
+    fn custom_elements_render_alongside_built_in_tokens() {
+        let rendered = render_template(
+            "{Source Name}_{Location}_{Project}",
+            &ctx(|c| {
+                c.elements = vec![
+                    ElementDefinition { name: "Location".to_string(), value: "Paris".to_string() },
+                    ElementDefinition { name: "Project".to_string(), value: "Ad Shoot".to_string() },
+                ];
+            }),
+        );
+        assert_eq!(rendered, "A-Cam_Paris_Ad Shoot");
+    }
+
+    #[test]
+    fn an_unfilled_element_renders_as_an_empty_string() {
+        let rendered = render_template(
+            "{Filename}-{Location}",
+            &ctx(|c| {
+                c.elements = vec![ElementDefinition { name: "Location".to_string(), value: String::new() }];
+            }),
+        );
+        assert_eq!(rendered, "C0001-");
+    }
+
+    #[test]
+    fn an_element_with_a_blank_name_is_ignored() {
+        let rendered = render_template(
+            "{Filename}",
+            &ctx(|c| {
+                c.elements = vec![ElementDefinition { name: "   ".to_string(), value: "x".to_string() }];
+            }),
+        );
+        assert_eq!(rendered, "C0001");
     }
 
     #[test]
