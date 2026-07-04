@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import {
   cancelCopy,
+  getVolumeSignature,
   listDisks,
   onBrokenMediaDetected,
   onCopyCancelled,
@@ -66,6 +67,7 @@ function App() {
   const applyCancelled = useTransfersStore((s) => s.applyCancelled);
   const applyBrokenMedia = useTransfersStore((s) => s.applyBrokenMedia);
   const clearBrokenMediaAlert = useTransfersStore((s) => s.clearBrokenMediaAlert);
+  const setResumeBlockedReason = useTransfersStore((s) => s.setResumeBlockedReason);
 
   const groups = useGroupsStore((s) => s.groups);
   const setGroupMeta = useGroupsStore((s) => s.setGroupMeta);
@@ -158,6 +160,8 @@ function App() {
         moveDeleteFailed: [],
         brokenMediaFiles: [],
         pendingBrokenMedia: null,
+        sourceVolumeSignature: payload.sourceVolumeSignature,
+        resumeBlockedReason: null,
       });
     }
 
@@ -278,7 +282,29 @@ function App() {
   // deliberately never re-enabled here -- it shouldn't silently start
   // deleting sources as a side effect of a Resume click; redo it from Build
   // Transfer if that's really what's wanted.
+  //
+  // Source Index check: confirms the disk currently at `job.sourcePath` is
+  // still the same physical volume the job originally read from, not a
+  // different card that happens to have mounted at the same drive letter
+  // since. Only blocks on a *confirmed* mismatch -- if either signature is
+  // unavailable (unsupported platform, or a path that isn't a recognizable
+  // local volume), there's nothing to contradict, so it fails open rather
+  // than blocking Resume on ambiguity.
   async function handleResumeJob(job: TransferJob) {
+    const currentSignature = await getVolumeSignature(job.sourcePath).catch(() => null);
+    if (
+      job.sourceVolumeSignature &&
+      currentSignature &&
+      currentSignature !== job.sourceVolumeSignature
+    ) {
+      setResumeBlockedReason(
+        job.id,
+        "Source disk has changed since this transfer started -- reconnect the original source before resuming.",
+      );
+      return;
+    }
+    setResumeBlockedReason(job.id, null);
+
     const groupId = await startTransferGroup(
       job.sourcePath,
       [job.destinationPath],

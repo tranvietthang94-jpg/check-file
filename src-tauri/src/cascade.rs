@@ -33,6 +33,12 @@ pub struct GroupJobAddedPayload {
     /// 1 = copies from the original source. 2 = relayed from the primary
     /// destination (Cascade mode only, spawned after hop 1 succeeds).
     pub hop: u8,
+    /// The physical volume backing `source` at the moment this job started
+    /// (see `disks::volume_signature`), recorded so a later Resume can
+    /// confirm the same disk is still the one plugged in before it
+    /// re-reads from `source`. `None` when it can't be determined -- the
+    /// frontend treats that as "can't verify" rather than blocking Resume.
+    pub source_volume_signature: Option<String>,
 }
 
 /// A relay hop should only run if the file(s) it depends on are actually
@@ -65,6 +71,7 @@ fn spawn_job<R: Runtime>(
             source: source.display().to_string(),
             destination: destination.display().to_string(),
             hop,
+            source_volume_signature: crate::disks::volume_signature(&source.display().to_string()),
         },
     );
 
@@ -159,6 +166,9 @@ pub fn start_transfer_group<R: Runtime>(
                     source: source.display().to_string(),
                     destination: primary.display().to_string(),
                     hop: 1,
+                    source_volume_signature: crate::disks::volume_signature(
+                        &source.display().to_string(),
+                    ),
                 },
             );
 

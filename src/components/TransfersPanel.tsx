@@ -122,6 +122,9 @@ function JobRow({
           </div>
         </div>
       )}
+      {job.resumeBlockedReason && (
+        <p className="text-xs text-red-400">⚠ {job.resumeBlockedReason}</p>
+      )}
       {job.verifiedFiles.length > 0 && (
         <p className="text-xs text-green-500">
           {job.verificationMode === "sourceAndDestination"

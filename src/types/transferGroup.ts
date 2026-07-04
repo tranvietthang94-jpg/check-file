@@ -14,4 +14,5 @@ export interface GroupJobAddedEventPayload {
   source: string;
   destination: string;
   hop: 1 | 2;
+  sourceVolumeSignature: string | null;
 }

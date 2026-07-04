@@ -50,6 +50,10 @@ export interface TransferJob {
   brokenMediaFiles: string[];
   /** Non-null while a Broken Media alert is awaiting Continue/Cancel from the user. */
   pendingBrokenMedia: string[] | null;
+  /** The source's volume identifier recorded when this job started (see Source Index). */
+  sourceVolumeSignature: string | null;
+  /** Non-null when a Resume attempt was blocked because the source disk no longer matches. */
+  resumeBlockedReason: string | null;
 }
 
 export interface ScanEventPayload {

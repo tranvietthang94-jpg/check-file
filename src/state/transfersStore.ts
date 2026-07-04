@@ -17,6 +17,7 @@ interface TransfersState {
   applyCancelled: (payload: CancelledEventPayload) => void;
   applyBrokenMedia: (payload: BrokenMediaEventPayload) => void;
   clearBrokenMediaAlert: (jobId: string) => void;
+  setResumeBlockedReason: (jobId: string, reason: string | null) => void;
 }
 
 function updateJob(
@@ -92,5 +93,10 @@ export const useTransfersStore = create<TransfersState>((set) => ({
   clearBrokenMediaAlert: (jobId) =>
     set((state) => ({
       jobs: updateJob(state.jobs, jobId, { pendingBrokenMedia: null }),
+    })),
+
+  setResumeBlockedReason: (jobId, reason) =>
+    set((state) => ({
+      jobs: updateJob(state.jobs, jobId, { resumeBlockedReason: reason }),
     })),
 }));

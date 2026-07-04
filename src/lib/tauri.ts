@@ -23,6 +23,11 @@ export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
 }
 
+/** The stable volume identifier backing `path` right now, or `null` if it can't be determined. */
+export function getVolumeSignature(path: string): Promise<string | null> {
+  return invoke<string | null>("get_volume_signature", { path });
+}
+
 export function onDisksChanged(
   callback: (disks: DiskInfo[]) => void,
 ): Promise<UnlistenFn> {

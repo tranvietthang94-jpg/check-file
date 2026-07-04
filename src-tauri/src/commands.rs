@@ -20,6 +20,15 @@ pub fn list_disks() -> Vec<DiskInfo> {
     enumerate_disks()
 }
 
+/// The stable volume identifier backing `path` right now (Windows serial
+/// number / macOS Volume UUID), or `None` if it can't be determined --
+/// powers Resume's Source Index check by letting the frontend compare
+/// "what's plugged in now" against what a job recorded at its original start.
+#[tauri::command]
+pub fn get_volume_signature(path: String) -> Option<String> {
+    crate::disks::volume_signature(&path)
+}
+
 #[tauri::command]
 pub fn cancel_copy(registry: State<JobRegistry>, job_id: String) -> bool {
     registry.cancel(&job_id)
