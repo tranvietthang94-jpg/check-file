@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
@@ -299,13 +299,41 @@ fn date_tokens(prefix: &str, t: SystemTime) -> Vec<(String, String)> {
     ]
 }
 
+/// Strips characters a rendered token value could use to break out of its
+/// single path component -- a Windows path separator (`/` or `\`) or drive
+/// prefix colon (`:`). Applied to values that aren't already a validated
+/// filename (a disk's display name like `"C:\"` for an unlabeled drive, or a
+/// free-typed Element value): without this, `{Source Name}` rendering to
+/// `"C:\"` makes the file name itself look like an absolute Windows path,
+/// and `Path::join` silently discards everything before an absolute
+/// component -- the file lands at the *drive's root* instead of inside the
+/// chosen destination folder (caught via a real "Access is denied" trying to
+/// write to `C:\`'s root, but a drive that doesn't require elevation would
+/// silently misplace the file with no error at all).
+fn sanitize_token_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control()
+            {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 /// Substitutes every known token in `template` with its rendered value.
 /// Unknown `{...}` placeholders are left as-is rather than erroring, so a
 /// typo degrades to a visibly wrong (but harmless) file name instead of
 /// failing the whole transfer.
 pub fn render_template(template: &str, ctx: &TokenContext) -> String {
     let mut tokens: Vec<(String, String)> = Vec::new();
-    tokens.push(("{Source Name}".to_string(), ctx.source_name.clone()));
+    tokens.push((
+        "{Source Name}".to_string(),
+        sanitize_token_value(&ctx.source_name),
+    ));
     tokens.push((
         "{Counter}".to_string(),
         pad(ctx.counter, ctx.counter_padding),
@@ -327,7 +355,7 @@ pub fn render_template(template: &str, ctx: &TokenContext) -> String {
         if name.is_empty() {
             continue;
         }
-        tokens.push((format!("{{{name}}}"), element.value.clone()));
+        tokens.push((format!("{{{name}}}"), sanitize_token_value(&element.value)));
     }
 
     let mut rendered = template.to_string();
@@ -377,7 +405,19 @@ pub fn build_destination_path(relative: &Path, ctx: &TokenContext, settings: &Or
             .unwrap_or_default()
     };
 
-    folder.join(file_name)
+    let joined = folder.join(file_name);
+    if joined.is_absolute() {
+        // Belt-and-suspenders: even if some future token slips an absolute-
+        // looking value through, never let the result escape the folder it
+        // was supposed to land in -- `destination.join(...)` on an absolute
+        // path silently discards the destination root entirely.
+        joined
+            .components()
+            .filter(|c| !matches!(c, Component::Prefix(_) | Component::RootDir))
+            .collect()
+    } else {
+        joined
+    }
 }
 
 /// Extension match (pattern starts with `.`) or case-insensitive partial
@@ -532,6 +572,51 @@ mod tests {
     fn renders_source_name_and_padded_counter() {
         let rendered = render_template("{Source Name}_{Counter}", &ctx(|c| c.counter = 7));
         assert_eq!(rendered, "A-Cam_007");
+    }
+
+    #[test]
+    fn an_unlabeled_drive_source_name_is_sanitized_instead_of_breaking_the_path() {
+        // An unlabeled Windows drive's display name is literally "C:\" --
+        // rendering that raw into a file name used to make `Path::join`
+        // treat the result as absolute and discard the destination root.
+        let rendered = render_template(
+            "{Source Name}_{Counter}",
+            &ctx(|c| {
+                c.source_name = "C:\\".to_string();
+                c.counter = 1;
+            }),
+        );
+        assert!(!rendered.contains(':'), "rendered {rendered:?} still has a colon");
+        assert!(!rendered.contains('\\'), "rendered {rendered:?} still has a backslash");
+    }
+
+    #[test]
+    fn build_destination_path_never_escapes_the_destination_via_a_drive_letter_source_name() {
+        let relative = Path::new("clip.mp4");
+        let settings = OrganizeSettings {
+            rename_template: Some("{Source Name}_{Filename}".to_string()),
+            ..OrganizeSettings::default()
+        };
+        let path = build_destination_path(
+            &relative,
+            &ctx(|c| c.source_name = "C:\\".to_string()),
+            &settings,
+        );
+        assert!(!path.is_absolute(), "path {path:?} escaped to an absolute location");
+    }
+
+    #[test]
+    fn a_free_typed_element_value_cannot_inject_a_path_separator_either() {
+        let rendered = render_template(
+            "{Filename}_{Location}",
+            &ctx(|c| {
+                c.elements = vec![ElementDefinition {
+                    name: "Location".to_string(),
+                    value: "..\\..\\evil".to_string(),
+                }];
+            }),
+        );
+        assert!(!rendered.contains('\\'), "rendered {rendered:?} still has a backslash");
     }
 
     #[test]
