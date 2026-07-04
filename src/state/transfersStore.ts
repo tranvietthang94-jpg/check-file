@@ -63,6 +63,8 @@ export const useTransfersStore = create<TransfersState>((set) => ({
         verifiedFiles: payload.verifiedFiles,
         skippedFiles: payload.skippedFiles,
         renamedFiles: payload.renamedFiles,
+        deletedSourceFiles: payload.deletedSourceFiles,
+        moveDeleteFailed: payload.moveDeleteFailed,
         currentFile: "",
       }),
     })),

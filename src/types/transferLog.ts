@@ -22,5 +22,7 @@ export interface TransferLogEntry {
   verifiedFiles: VerifiedFile[];
   skippedFiles: SkippedFile[];
   renamedFiles: RenamedFile[];
+  deletedSourceFiles: string[];
+  moveDeleteFailed: FailedFile[];
   mhlPath: string | null;
 }

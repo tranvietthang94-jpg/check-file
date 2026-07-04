@@ -211,6 +211,15 @@ fn render_issue_summary(e: &TransferLogEntry) -> String {
     if !e.renamed_files.is_empty() {
         parts.push(format!(r#"<span class="badge">{} renamed</span>"#, e.renamed_files.len()));
     }
+    if !e.deleted_source_files.is_empty() {
+        parts.push(format!(r#"<span class="badge">{} moved</span>"#, e.deleted_source_files.len()));
+    }
+    if !e.move_delete_failed.is_empty() {
+        parts.push(format!(
+            r#"<span class="badge badge-failed">{} move-delete failed</span>"#,
+            e.move_delete_failed.len()
+        ));
+    }
     if parts.is_empty() {
         r#"<span class="muted">None</span>"#.to_string()
     } else {
@@ -223,7 +232,12 @@ fn render_issue_summary(e: &TransferLogEntry) -> String {
 fn render_files_section(entries: &[TransferLogEntry]) -> String {
     let sections: String = entries
         .iter()
-        .filter(|e| !e.failed_files.is_empty() || !e.skipped_files.is_empty() || !e.renamed_files.is_empty())
+        .filter(|e| {
+            !e.failed_files.is_empty()
+                || !e.skipped_files.is_empty()
+                || !e.renamed_files.is_empty()
+                || !e.move_delete_failed.is_empty()
+        })
         .map(|e| {
             let failed: String = e
                 .failed_files
@@ -252,8 +266,19 @@ fn render_files_section(entries: &[TransferLogEntry]) -> String {
                     )
                 })
                 .collect();
+            let move_delete_failed: String = e
+                .move_delete_failed
+                .iter()
+                .map(|f| {
+                    format!(
+                        "<li><span class=\"badge badge-failed\">Move failed</span> {} -- {}</li>",
+                        escape_html(&f.path),
+                        escape_html(&f.message)
+                    )
+                })
+                .collect();
             format!(
-                "<h3>{}</h3><ul class=\"file-list\">{failed}{skipped}{renamed}</ul>",
+                "<h3>{}</h3><ul class=\"file-list\">{failed}{skipped}{renamed}{move_delete_failed}</ul>",
                 escape_html(&e.source_name)
             )
         })
@@ -463,6 +488,8 @@ mod tests {
             }],
             skipped_files: Vec::new(),
             renamed_files: Vec::new(),
+            deleted_source_files: Vec::new(),
+            move_delete_failed: Vec::new(),
             mhl_path: None,
         }
     }
@@ -543,6 +570,31 @@ mod tests {
         assert!(html.contains("C0003.MP4"));
         assert!(html.contains("C0004.MP4"));
         assert!(html.contains("C0004_1.MP4"));
+    }
+
+    #[test]
+    fn moved_files_render_a_badge_but_no_files_section_entry() {
+        let mut entry = sample_entry("job-1", "G:\\", "D:\\Offload");
+        entry.deleted_source_files = vec!["C0001.MP4".to_string()];
+        let html = generate_report_html(&[entry], &default_request(), None);
+        assert!(html.contains("1 moved"));
+        // A successful move isn't a problem worth its own Files-section row --
+        // only a failure to delete is.
+        assert!(!html.contains("class=\"files\""));
+    }
+
+    #[test]
+    fn a_move_delete_failure_renders_in_both_the_transfer_row_and_the_files_section() {
+        let mut entry = sample_entry("job-1", "G:\\", "D:\\Offload");
+        entry.move_delete_failed.push(FailedFile {
+            path: "C0005.MP4".to_string(),
+            message: "access denied".to_string(),
+        });
+        let html = generate_report_html(&[entry], &default_request(), None);
+        assert!(html.contains("1 move-delete failed"));
+        assert!(html.contains("class=\"files\""));
+        assert!(html.contains("C0005.MP4"));
+        assert!(html.contains("access denied"));
     }
 
     #[test]

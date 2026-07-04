@@ -30,6 +30,13 @@ pub struct TransferLogEntry {
     pub verified_files: Vec<VerifiedFile>,
     pub skipped_files: Vec<SkippedFile>,
     pub renamed_files: Vec<RenamedFile>,
+    /// Source files removed after Move confirmed each was safely verified (or
+    /// already identical) at the destination. `#[serde(default)]` so logs
+    /// saved before Move existed still load.
+    #[serde(default)]
+    pub deleted_source_files: Vec<String>,
+    #[serde(default)]
+    pub move_delete_failed: Vec<FailedFile>,
     pub mhl_path: Option<String>,
 }
 
@@ -103,6 +110,8 @@ mod tests {
             verified_files: Vec::new(),
             skipped_files: Vec::new(),
             renamed_files: Vec::new(),
+            deleted_source_files: Vec::new(),
+            move_delete_failed: Vec::new(),
             mhl_path: Some("D:\\Offload\\20260703_200005.mhl".to_string()),
         }
     }
@@ -151,5 +160,39 @@ mod tests {
         let logs = list_logs_from_dir(dir.path()).unwrap();
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].job_id, "good");
+    }
+
+    #[test]
+    fn a_log_saved_before_move_existed_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path()).unwrap();
+        // No deletedSourceFiles/moveDeleteFailed fields at all -- matches a
+        // log written before this feature existed.
+        fs::write(
+            dir.path().join("pre-move.json"),
+            br#"{
+                "jobId": "pre-move",
+                "sourceName": "A-Cam",
+                "source": "G:\\CLIP",
+                "destination": "D:\\Offload",
+                "verificationMode": "sourceAndDestination",
+                "checksumAlgorithm": "xxh64",
+                "startedAt": "2026-07-03T20:00:00Z",
+                "finishedAt": "2026-07-03T20:00:05Z",
+                "filesCopied": 1,
+                "bytesCopied": 100,
+                "failedFiles": [],
+                "verifiedFiles": [],
+                "skippedFiles": [],
+                "renamedFiles": [],
+                "mhlPath": null
+            }"#,
+        )
+        .unwrap();
+
+        let logs = list_logs_from_dir(dir.path()).unwrap();
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].deleted_source_files.is_empty());
+        assert!(logs[0].move_delete_failed.is_empty());
     }
 }

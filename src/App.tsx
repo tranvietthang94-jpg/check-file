@@ -144,6 +144,8 @@ function App() {
         verifiedFiles: [],
         skippedFiles: [],
         renamedFiles: [],
+        deletedSourceFiles: [],
+        moveDeleteFailed: [],
       });
     }
 
@@ -221,6 +223,7 @@ function App() {
     source: Endpoint,
     destinationEndpoints: Endpoint[],
     mode: TransferGroupMode,
+    moveAfterTransfer: boolean,
   ) {
     const groupId = await startTransferGroup(
       source.path,
@@ -230,6 +233,7 @@ function App() {
       checksumAlgorithm,
       endpointLabel(source, disks),
       organize,
+      moveAfterTransfer,
     );
     setGroupMeta(
       groupId,

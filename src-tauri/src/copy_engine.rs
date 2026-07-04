@@ -55,6 +55,25 @@ fn should_retry_copy(attempt: u32, cancelled: bool) -> bool {
     attempt < MAX_COPY_ATTEMPTS && !cancelled
 }
 
+/// Deletes one source file once its copy is confirmed safe at the
+/// destination (verified or an identical skip). A deletion failure (e.g. a
+/// read-only card, or the file still open elsewhere) is recorded rather than
+/// treated as a copy failure -- the destination copy is already good either way.
+fn try_move_delete_source(
+    absolute: &Path,
+    relative_display: &str,
+    deleted_source_files: &mut Vec<String>,
+    move_delete_failed: &mut Vec<FailedFile>,
+) {
+    match fs::remove_file(absolute) {
+        Ok(()) => deleted_source_files.push(relative_display.to_string()),
+        Err(err) => move_delete_failed.push(FailedFile {
+            path: relative_display.to_string(),
+            message: err.to_string(),
+        }),
+    }
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressPayload {
@@ -118,6 +137,8 @@ pub struct CompletePayload {
     pub verified_files: Vec<VerifiedFile>,
     pub skipped_files: Vec<SkippedFile>,
     pub renamed_files: Vec<RenamedFile>,
+    pub deleted_source_files: Vec<String>,
+    pub move_delete_failed: Vec<FailedFile>,
 }
 
 #[derive(Serialize, Clone)]
@@ -140,6 +161,15 @@ pub struct CopyOutcome {
     /// One entry per successfully (and, when verification ran, successfully
     /// verified) copied file -- feeds the MHL written at the destination root.
     pub mhl_entries: Vec<MhlFileEntry>,
+    /// Source-relative paths removed from `source` after `move_after_transfer`
+    /// confirmed each one was safely verified (or already identical) at the
+    /// destination.
+    pub deleted_source_files: Vec<String>,
+    /// A file whose copy succeeded (and was verified) but whose *source* copy
+    /// could not be deleted -- e.g. the card is read-only or the file is
+    /// still open elsewhere. Never treated as a copy failure: the data is
+    /// safely at the destination either way.
+    pub move_delete_failed: Vec<FailedFile>,
 }
 
 /// Destination for scan/progress notifications. Kept separate from Tauri so
@@ -380,6 +410,7 @@ pub fn run_copy_core(
     checksum_algorithm: ChecksumAlgorithm,
     source_name: &str,
     organize: &OrganizeSettings,
+    move_after_transfer: bool,
 ) -> CopyOutcome {
     let mut entries = match scan_source(source) {
         Ok(e) => e,
@@ -396,6 +427,8 @@ pub fn run_copy_core(
                 skipped_files: Vec::new(),
                 renamed_files: Vec::new(),
                 mhl_entries: Vec::new(),
+                deleted_source_files: Vec::new(),
+                move_delete_failed: Vec::new(),
             };
         }
     };
@@ -430,6 +463,10 @@ pub fn run_copy_core(
         .collect();
 
     let compute_hash = verification_mode != VerificationMode::Transfer;
+    // Deleting the only copy of a source file is never worth the speed of
+    // Transfer mode's size-only check -- Move only ever acts on a file once
+    // it's been through an actual hash comparison.
+    let can_move = move_after_transfer && compute_hash;
     let mut tracker = ProgressTracker::new(sink, job_id, total_bytes, total_files);
     let mut buffer = vec![0u8; CHUNK_SIZE];
     let mut failed_files = Vec::new();
@@ -437,6 +474,8 @@ pub fn run_copy_core(
     let mut skipped_files = Vec::new();
     let mut renamed_files = Vec::new();
     let mut mhl_entries = Vec::new();
+    let mut deleted_source_files = Vec::new();
+    let mut move_delete_failed = Vec::new();
     let mut cancelled = false;
 
     for (index, entry) in entries.iter().enumerate() {
@@ -491,6 +530,14 @@ pub fn run_copy_core(
             Ok(DuplicateAction::Skip) => {
                 tracker.add_bytes(entry.size, &relative_display);
                 tracker.finish_file();
+                if can_move {
+                    try_move_delete_source(
+                        &entry.absolute,
+                        &relative_display,
+                        &mut deleted_source_files,
+                        &mut move_delete_failed,
+                    );
+                }
                 skipped_files.push(SkippedFile {
                     path: relative_display,
                 });
@@ -563,6 +610,14 @@ pub fn run_copy_core(
                                     checksum: hash.clone(),
                                     algorithm: checksum_algorithm,
                                 });
+                                if can_move {
+                                    try_move_delete_source(
+                                        &entry.absolute,
+                                        &copy_display,
+                                        &mut deleted_source_files,
+                                        &mut move_delete_failed,
+                                    );
+                                }
                                 mhl_checksum = Some(hash);
                             }
                             Ok(false) => {
@@ -591,6 +646,14 @@ pub fn run_copy_core(
                             checksum: hash.clone(),
                             algorithm: checksum_algorithm,
                         });
+                        if can_move {
+                            try_move_delete_source(
+                                &entry.absolute,
+                                &copy_display,
+                                &mut deleted_source_files,
+                                &mut move_delete_failed,
+                            );
+                        }
                         mhl_checksum = Some(hash);
                     }
                 }
@@ -640,6 +703,8 @@ pub fn run_copy_core(
         skipped_files,
         renamed_files,
         mhl_entries,
+        deleted_source_files,
+        move_delete_failed,
     }
 }
 
@@ -680,6 +745,7 @@ pub fn run_copy_job<R: Runtime>(
     checksum_algorithm: ChecksumAlgorithm,
     source_name: String,
     organize: OrganizeSettings,
+    move_after_transfer: bool,
 ) -> CopyOutcome {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
@@ -696,6 +762,7 @@ pub fn run_copy_job<R: Runtime>(
         checksum_algorithm,
         &source_name,
         &organize,
+        move_after_transfer,
     );
     let finished_at = SystemTime::now();
 
@@ -717,6 +784,8 @@ pub fn run_copy_job<R: Runtime>(
                 verified_files: outcome.verified_files.clone(),
                 skipped_files: outcome.skipped_files.clone(),
                 renamed_files: outcome.renamed_files.clone(),
+                deleted_source_files: outcome.deleted_source_files.clone(),
+                move_delete_failed: outcome.move_delete_failed.clone(),
             },
         );
 
@@ -740,6 +809,8 @@ pub fn run_copy_job<R: Runtime>(
             verified_files: outcome.verified_files.clone(),
             skipped_files: outcome.skipped_files.clone(),
             renamed_files: outcome.renamed_files.clone(),
+            deleted_source_files: outcome.deleted_source_files.clone(),
+            move_delete_failed: outcome.move_delete_failed.clone(),
             mhl_path,
         };
         let _ = transfer_log::save_log(&app_handle, &log_entry);
@@ -797,6 +868,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(!outcome.cancelled);
@@ -830,6 +902,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(outcome.cancelled);
@@ -851,6 +924,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert_eq!(outcome.files_copied, 0);
@@ -887,6 +961,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         // The final flush always emits at least one progress event.
@@ -912,6 +987,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(!outcome.cancelled);
@@ -939,6 +1015,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -967,6 +1044,7 @@ mod tests {
             ChecksumAlgorithm::Md5,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -996,6 +1074,7 @@ mod tests {
                 ChecksumAlgorithm::Xxh64,
                 "Source",
                 &OrganizeSettings::default(),
+                false,
             )
         };
 
@@ -1035,6 +1114,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1085,6 +1165,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         let dest_modified = fs::metadata(dst_dir.path().join("clip.mp4"))
@@ -1121,6 +1202,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "A-Cam",
             &organize,
+            false,
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1154,6 +1236,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &organize,
+            false,
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1188,6 +1271,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &organize,
+            false,
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1212,6 +1296,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -1239,6 +1324,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -1246,5 +1332,139 @@ mod tests {
             outcome.mhl_entries[0].checksum.is_none(),
             "Transfer mode never computes a hash, so the MHL entry must be size-only"
         );
+    }
+
+    #[test]
+    fn move_deletes_the_source_once_verified() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-move".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            true,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(outcome.deleted_source_files, vec!["clip.mp4".to_string()]);
+        assert!(outcome.move_delete_failed.is_empty());
+        assert!(!src_file.exists(), "the source copy should be gone once verified");
+        assert_eq!(
+            fs::read(dst_dir.path().join("clip.mp4")).unwrap(),
+            b"camera footage",
+            "the destination copy must still be intact"
+        );
+    }
+
+    #[test]
+    fn move_never_deletes_anything_in_transfer_mode() {
+        // Transfer mode never hashes, so there's no cryptographic proof the
+        // copy is intact -- Move must refuse to delete the only copy of a
+        // file on that basis alone, regardless of the caller's setting.
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-move-transfer".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            true,
+        );
+
+        assert!(outcome.deleted_source_files.is_empty());
+        assert!(src_file.exists(), "Transfer mode gives no verification to delete on");
+    }
+
+    #[test]
+    fn move_deletes_the_source_of_an_already_offloaded_skip() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        // First offload leaves an identical file at the destination.
+        run_copy_core(
+            &NoopSink,
+            "job-move-skip-1".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &AtomicBool::new(false),
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+        assert!(src_file.exists());
+
+        // Re-running with Move on should still remove the source even though
+        // this pass only *skips* the file (dedup, not a fresh verified copy)
+        // -- the data is already safely and identically at the destination.
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-move-skip-2".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            true,
+        );
+
+        assert_eq!(outcome.skipped_files.len(), 1);
+        assert_eq!(outcome.deleted_source_files, vec!["clip.mp4".to_string()]);
+        assert!(!src_file.exists());
+    }
+
+    #[test]
+    fn move_never_deletes_a_file_that_failed_to_copy() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(src_dir.path().join("sub")).unwrap();
+        let src_file = src_dir.path().join("sub").join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        // A plain file already sitting where the destination's parent
+        // directory needs to go forces `create_dir_all` to fail -- portable
+        // and independent of any real disk-full/permission error.
+        fs::write(dst_dir.path().join("sub"), b"not a directory").unwrap();
+
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-move-failed".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            true,
+        );
+
+        assert_eq!(outcome.failed_files.len(), 1);
+        assert!(outcome.deleted_source_files.is_empty());
+        assert!(src_file.exists(), "a failed copy must never delete the only remaining copy");
     }
 }

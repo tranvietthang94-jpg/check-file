@@ -96,6 +96,20 @@ function JobRow({ job, onCancel }: { job: TransferJob; onCancel: (jobId: string)
           {job.failedFiles.length} file(s) failed — {job.failedFiles[0].message}
         </p>
       )}
+      {job.deletedSourceFiles.length > 0 && (
+        <p
+          className="text-xs text-neutral-400"
+          title={job.deletedSourceFiles.join(", ")}
+        >
+          {job.deletedSourceFiles.length} file(s) moved (source removed after verified copy)
+        </p>
+      )}
+      {job.moveDeleteFailed.length > 0 && (
+        <p className="text-xs text-orange-400" title={job.moveDeleteFailed[0].message}>
+          {job.moveDeleteFailed.length} file(s) copied but the source could not be removed —{" "}
+          {job.moveDeleteFailed[0].message}
+        </p>
+      )}
     </li>
   );
 }

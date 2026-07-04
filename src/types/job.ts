@@ -45,6 +45,8 @@ export interface TransferJob {
   verifiedFiles: VerifiedFile[];
   skippedFiles: SkippedFile[];
   renamedFiles: RenamedFile[];
+  deletedSourceFiles: string[];
+  moveDeleteFailed: FailedFile[];
 }
 
 export interface ScanEventPayload {
@@ -71,6 +73,8 @@ export interface CompleteEventPayload {
   verifiedFiles: VerifiedFile[];
   skippedFiles: SkippedFile[];
   renamedFiles: RenamedFile[];
+  deletedSourceFiles: string[];
+  moveDeleteFailed: FailedFile[];
 }
 
 export interface CancelledEventPayload {

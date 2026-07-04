@@ -38,6 +38,16 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
         {entry.failedFiles.length > 0 && (
           <span className="text-red-400">{entry.failedFiles.length} failed</span>
         )}
+        {entry.deletedSourceFiles.length > 0 && (
+          <span title={entry.deletedSourceFiles.join(", ")}>
+            {entry.deletedSourceFiles.length} moved
+          </span>
+        )}
+        {entry.moveDeleteFailed.length > 0 && (
+          <span className="text-orange-400" title={entry.moveDeleteFailed[0].message}>
+            {entry.moveDeleteFailed.length} move-delete failed
+          </span>
+        )}
         {mhlName && <span title={entry.mhlPath ?? undefined}>MHL: {mhlName}</span>}
       </div>
       <button

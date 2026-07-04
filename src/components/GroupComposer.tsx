@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSettingsStore } from "../state/settingsStore";
 import type { DiskInfo, Endpoint } from "../types/disk";
 import type { TransferGroupMode } from "../types/transferGroup";
 
@@ -6,7 +7,12 @@ interface GroupComposerProps {
   sources: Endpoint[];
   destinations: Endpoint[];
   disks: DiskInfo[];
-  onStart: (source: Endpoint, destinations: Endpoint[], mode: TransferGroupMode) => void;
+  onStart: (
+    source: Endpoint,
+    destinations: Endpoint[],
+    mode: TransferGroupMode,
+    moveAfterTransfer: boolean,
+  ) => void;
 }
 
 function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]): string {
@@ -18,11 +24,19 @@ export function GroupComposer({ sources, destinations, disks, onStart }: GroupCo
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [destIds, setDestIds] = useState<string[]>([]); // selection order = cascade hop order
   const [mode, setMode] = useState<TransferGroupMode>("parallel");
+  const [moveAfterTransfer, setMoveAfterTransfer] = useState(false);
+  const verificationMode = useSettingsStore((s) => s.verificationMode);
 
   const source = sources.find((s) => s.diskId === sourceId) ?? null;
   const selectedDestinations = destIds
     .map((id) => destinations.find((d) => d.diskId === id))
     .filter((d): d is Endpoint => !!d);
+  // Move only ever makes unambiguous sense with exactly one destination --
+  // with more, every destination reads the same source independently, so
+  // there's no single point where deleting it wouldn't race another read.
+  // It also requires an actual hash comparison: Transfer mode's size-only
+  // check is never enough proof to delete the only remaining copy of a file.
+  const moveEligible = selectedDestinations.length === 1 && verificationMode !== "transfer";
 
   function toggleDestination(diskId: string) {
     setDestIds((prev) =>
@@ -32,7 +46,7 @@ export function GroupComposer({ sources, destinations, disks, onStart }: GroupCo
 
   function handleStart() {
     if (!source || selectedDestinations.length === 0) return;
-    onStart(source, selectedDestinations, mode);
+    onStart(source, selectedDestinations, mode, moveAfterTransfer && moveEligible);
   }
 
   const canStart = !!source && selectedDestinations.length > 0;
@@ -121,6 +135,26 @@ export function GroupComposer({ sources, destinations, disks, onStart }: GroupCo
               </span>
             </label>
           </div>
+
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={moveAfterTransfer && moveEligible}
+              disabled={!moveEligible}
+              onChange={(e) => setMoveAfterTransfer(e.currentTarget.checked)}
+              className="mt-0.5"
+            />
+            <span className={moveEligible ? undefined : "opacity-40"}>
+              <span className="font-medium">Move (delete source after verified copy)</span>
+              <span className="block text-neutral-500">
+                {moveEligible
+                  ? "Only removes a file once it's confirmed safe at the destination."
+                  : selectedDestinations.length !== 1
+                    ? "Only available with exactly one destination."
+                    : "Requires Source or Source & Destination verification (not Transfer-only)."}
+              </span>
+            </span>
+          </label>
 
           <button
             type="button"

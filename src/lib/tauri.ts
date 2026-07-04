@@ -35,6 +35,7 @@ export function startTransferGroup(
   checksumAlgorithm: ChecksumAlgorithm,
   sourceName: string,
   organize: OrganizeSettings,
+  moveAfterTransfer: boolean,
 ): Promise<string> {
   return invoke<string>("start_transfer_group", {
     source,
@@ -44,6 +45,7 @@ export function startTransferGroup(
     checksumAlgorithm,
     sourceName,
     organize,
+    moveAfterTransfer,
   });
 }
 

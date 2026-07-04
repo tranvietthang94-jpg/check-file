@@ -52,6 +52,7 @@ fn spawn_job<R: Runtime>(
     checksum_algorithm: ChecksumAlgorithm,
     source_name: String,
     organize: OrganizeSettings,
+    move_after_transfer: bool,
 ) -> String {
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = app_handle.state::<JobRegistry>().register(job_id.clone());
@@ -95,6 +96,7 @@ fn spawn_job<R: Runtime>(
             checksum_algorithm,
             source_name,
             organize,
+            move_after_transfer,
         );
     });
 
@@ -114,11 +116,17 @@ pub fn start_transfer_group<R: Runtime>(
     checksum_algorithm: ChecksumAlgorithm,
     source_name: String,
     organize: OrganizeSettings,
+    move_after_transfer: bool,
 ) -> String {
     let group_id = Uuid::new_v4().to_string();
 
     match mode {
         TransferGroupMode::Parallel => {
+            // Every destination reads the same source independently -- with
+            // more than one, there's no single point where it's safe to
+            // delete the source without racing the other destination's read.
+            // Move only ever applies to the unambiguous single-destination case.
+            let effective_move = move_after_transfer && destinations.len() == 1;
             for destination in destinations {
                 spawn_job(
                     &app_handle,
@@ -130,6 +138,7 @@ pub fn start_transfer_group<R: Runtime>(
                     checksum_algorithm,
                     source_name.clone(),
                     organize.clone(),
+                    effective_move,
                 );
             }
         }
@@ -177,6 +186,10 @@ pub fn start_transfer_group<R: Runtime>(
                     return;
                 }
 
+                // Hop 1 has exactly one destination (primary) by construction,
+                // so it's always the unambiguous single-destination case Move
+                // is safe for -- regardless of how many `rest` destinations
+                // this cascade relays to afterward.
                 let outcome = copy_engine::run_copy_job(
                     app_handle_thread.clone(),
                     hop1_job_id,
@@ -187,6 +200,7 @@ pub fn start_transfer_group<R: Runtime>(
                     checksum_algorithm,
                     source_name_thread.clone(),
                     organize_thread.clone(),
+                    move_after_transfer,
                 );
 
                 if !should_cascade_continue(&outcome) {
@@ -194,6 +208,9 @@ pub fn start_transfer_group<R: Runtime>(
                 }
 
                 for destination in rest {
+                    // Hop 2's "source" is the primary destination we just
+                    // wrote and verified -- it must never be deleted, so this
+                    // is never Move-eligible regardless of the caller's setting.
                     spawn_job(
                         &app_handle_thread,
                         &group_id_thread,
@@ -204,6 +221,7 @@ pub fn start_transfer_group<R: Runtime>(
                         checksum_algorithm,
                         source_name_thread.clone(),
                         organize_thread.clone(),
+                        false,
                     );
                 }
             });
@@ -248,6 +266,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
         assert!(should_cascade_continue(&hop1));
 
@@ -261,6 +280,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
         );
 
         assert!(hop2.failed_files.is_empty());
@@ -280,6 +300,8 @@ mod tests {
             skipped_files: Vec::new(),
             renamed_files: Vec::new(),
             mhl_entries: Vec::new(),
+            deleted_source_files: Vec::new(),
+            move_delete_failed: Vec::new(),
         }
     }
 
