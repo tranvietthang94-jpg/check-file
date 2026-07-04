@@ -432,6 +432,22 @@ enum CopyFileOutcome {
     Completed { source_hash: Option<String> },
 }
 
+/// The path a file is streamed into while its copy (and, for Source &
+/// Destination mode, its verification) is still in progress. Never renamed
+/// to `dest_path` until the copy -- and, when applicable, the destination
+/// re-read -- has actually succeeded, so an interrupted copy (cancelled,
+/// crashed, or a plain I/O failure) never leaves anything behind under the
+/// final name for Duplicate Detection to later mistake for a genuinely
+/// different, unrelated file of the same name. A leftover from a previous
+/// crashed attempt is silently overwritten by `fs::File::create` the next
+/// time the same destination path is attempted, so no separate cleanup pass
+/// is needed at job start.
+fn staging_path_for(dest_path: &Path) -> PathBuf {
+    let mut name = dest_path.file_name().unwrap_or_default().to_os_string();
+    name.push(".ofkit-partial");
+    dest_path.with_file_name(name)
+}
+
 /// Copies one file in fixed-size chunks (streaming, not loaded fully into RAM),
 /// checking the cancel flag between chunks and optionally hashing the source
 /// bytes as they're read (no extra I/O pass). Returns `Cancelled` if cancelled
@@ -704,6 +720,7 @@ pub fn run_copy_core(
             checksum_algorithm,
         );
         let compute_hash_for_this_file = compute_hash && known_hash.is_none();
+        let staging_path = staging_path_for(&dest_path);
 
         let mut attempt = 1;
         let copy_result = loop {
@@ -714,7 +731,7 @@ pub fn run_copy_core(
             let bytes_before_attempt = tracker.bytes_copied;
             let result = copy_file_chunked(
                 &entry.absolute,
-                &dest_path,
+                &staging_path,
                 &mut buffer,
                 cancel_flag,
                 &mut tracker,
@@ -743,25 +760,17 @@ pub fn run_copy_core(
                 // `record_in_mhl` so a bad copy is never recorded as trustworthy.
                 let mut mhl_checksum: Option<String> = None;
                 let mut record_in_mhl = true;
-                if let Some(hash) = source_hash {
+
+                // Only a Source & Destination re-read proves the bytes landed
+                // intact -- every other path (Transfer's size-only check,
+                // Source's stream-time-only hash) treats the streaming copy
+                // finishing without an I/O error as all the proof its mode
+                // ever promised. Either way, nothing is renamed into its
+                // final `dest_path` name until this check passes.
+                let verified_ok = if let Some(hash) = &source_hash {
                     if verification_mode == VerificationMode::SourceAndDestination {
-                        match checksum::verify_file_hash(&dest_path, &hash, checksum_algorithm) {
-                            Ok(true) => {
-                                verified_files.push(VerifiedFile {
-                                    path: copy_display.clone(),
-                                    checksum: hash.clone(),
-                                    algorithm: checksum_algorithm,
-                                });
-                                if can_move {
-                                    try_move_delete_source(
-                                        &entry.absolute,
-                                        &copy_display,
-                                        &mut deleted_source_files,
-                                        &mut move_delete_failed,
-                                    );
-                                }
-                                mhl_checksum = Some(hash);
-                            }
+                        match checksum::verify_file_hash(&staging_path, hash, checksum_algorithm) {
+                            Ok(true) => true,
                             Ok(false) => {
                                 failed_files.push(FailedFile {
                                     path: copy_display.clone(),
@@ -770,6 +779,7 @@ pub fn run_copy_core(
                                             .to_string(),
                                 });
                                 record_in_mhl = false;
+                                false
                             }
                             Err(err) => {
                                 failed_files.push(FailedFile {
@@ -779,26 +789,49 @@ pub fn run_copy_core(
                                     ),
                                 });
                                 record_in_mhl = false;
+                                false
                             }
                         }
                     } else {
-                        // Source-only mode: nothing to compare against yet, just record it.
-                        verified_files.push(VerifiedFile {
-                            path: copy_display.clone(),
-                            checksum: hash.clone(),
-                            algorithm: checksum_algorithm,
-                        });
-                        if can_move {
-                            try_move_delete_source(
-                                &entry.absolute,
-                                &copy_display,
-                                &mut deleted_source_files,
-                                &mut move_delete_failed,
-                            );
-                        }
-                        mhl_checksum = Some(hash);
+                        true
                     }
+                } else {
+                    true
+                };
+
+                if verified_ok {
+                    match fs::rename(&staging_path, &dest_path) {
+                        Ok(()) => {
+                            if let Some(hash) = &source_hash {
+                                verified_files.push(VerifiedFile {
+                                    path: copy_display.clone(),
+                                    checksum: hash.clone(),
+                                    algorithm: checksum_algorithm,
+                                });
+                                mhl_checksum = Some(hash.clone());
+                            }
+                            if can_move {
+                                try_move_delete_source(
+                                    &entry.absolute,
+                                    &copy_display,
+                                    &mut deleted_source_files,
+                                    &mut move_delete_failed,
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            failed_files.push(FailedFile {
+                                path: copy_display.clone(),
+                                message: format!("copied file could not be moved into place: {err}"),
+                            });
+                            record_in_mhl = false;
+                            let _ = fs::remove_file(&staging_path);
+                        }
+                    }
+                } else {
+                    let _ = fs::remove_file(&staging_path);
                 }
+
                 if record_in_mhl {
                     mhl_entries.push(MhlFileEntry {
                         relative_path: copy_display,
@@ -814,14 +847,21 @@ pub fn run_copy_core(
                 cancelled = true;
                 break;
             }
-            Err(err) => failed_files.push(FailedFile {
-                path: copy_display,
-                message: if attempt > 1 {
-                    format!("{err} (failed after {attempt} attempts)")
-                } else {
-                    err.to_string()
-                },
-            }),
+            Err(err) => {
+                // The streaming copy never finished -- nothing under the
+                // final `dest_path` name to worry about, but the staging
+                // file it was writing into could still be sitting there
+                // partially written.
+                let _ = fs::remove_file(&staging_path);
+                failed_files.push(FailedFile {
+                    path: copy_display,
+                    message: if attempt > 1 {
+                        format!("{err} (failed after {attempt} attempts)")
+                    } else {
+                        err.to_string()
+                    },
+                });
+            }
         }
     }
 
@@ -1073,6 +1113,100 @@ mod tests {
 
         assert!(outcome.cancelled);
         assert!(!dst_dir.path().join("big.bin").exists());
+        assert!(
+            !dst_dir.path().join("big.bin.ofkit-partial").exists(),
+            "the staging file it was streaming into must be cleaned up too, or it would sit \
+             there forever under a name Duplicate Detection never even looks at"
+        );
+    }
+
+    #[test]
+    fn a_stale_staging_leftover_from_a_previous_crash_is_silently_overwritten() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("clip.mov"), b"camera footage").unwrap();
+
+        // Simulates the app being killed mid-copy on a previous run: a
+        // half-written staging file left behind under the same name this
+        // run will also pick for its own staging path.
+        fs::write(dst_dir.path().join("clip.mov.ofkit-partial"), b"GARBAGE-FROM-A-CRASHED-RUN")
+            .unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-stale-staging".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(
+            fs::read(dst_dir.path().join("clip.mov")).unwrap(),
+            b"camera footage",
+            "a stale leftover staging file must not corrupt or block a fresh retry"
+        );
+        assert!(!dst_dir.path().join("clip.mov.ofkit-partial").exists());
+    }
+
+    #[test]
+    fn checksum_mismatch_in_source_and_destination_mode_leaves_no_file_under_any_name() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mov");
+        fs::write(&src_file, b"camera footage").unwrap();
+        let meta = fs::metadata(&src_file).unwrap();
+
+        // A source MHL claiming a checksum that doesn't match the real bytes
+        // (MHL Awareness reuses it instead of rehashing) deterministically
+        // forces the Source & Destination re-read below to detect a
+        // mismatch, without needing to corrupt anything mid-write.
+        let bogus_entry = MhlFileEntry {
+            relative_path: "clip.mov".to_string(),
+            size: meta.len(),
+            modified: meta.modified().unwrap(),
+            checksum: Some("0000000000000000".to_string()),
+            algorithm: ChecksumAlgorithm::Xxh64,
+            hashed_at: SystemTime::now(),
+        };
+        mhl::write_mhl(src_dir.path(), &[bogus_entry], SystemTime::now(), SystemTime::now()).unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-mismatch".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        // `write_mhl` drops the source MHL directly into `src_dir`, so the
+        // scan also picks up that `.mhl` file itself as an ordinary (and
+        // perfectly verifiable) file to copy -- assertions below are scoped
+        // to `clip.mov` specifically rather than the whole outcome.
+        assert_eq!(outcome.failed_files.len(), 1);
+        assert_eq!(outcome.failed_files[0].path, "clip.mov");
+        assert!(!outcome.verified_files.iter().any(|f| f.path == "clip.mov"));
+        assert!(!outcome.mhl_entries.iter().any(|e| e.relative_path == "clip.mov"));
+        assert!(
+            !dst_dir.path().join("clip.mov").exists(),
+            "an unverified copy must never be renamed into its final, trusted-looking name"
+        );
+        assert!(
+            !dst_dir.path().join("clip.mov.ofkit-partial").exists(),
+            "the failed staging attempt must be cleaned up, not left behind indefinitely"
+        );
     }
 
     #[test]
