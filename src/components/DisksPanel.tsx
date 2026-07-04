@@ -21,10 +21,17 @@ export function DisksPanel() {
   const destinations = useDisksStore((s) => s.destinations);
   const addSource = useDisksStore((s) => s.addSource);
   const addDestination = useDisksStore((s) => s.addDestination);
+  const hiddenDiskIds = useDisksStore((s) => s.hiddenDiskIds);
+  const hideDisk = useDisksStore((s) => s.hideDisk);
+  const unhideDisk = useDisksStore((s) => s.unhideDisk);
   const jobs = useTransfersStore((s) => s.jobs);
 
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
+  const [showHidden, setShowHidden] = useState(false);
+
+  const visibleDisks = disks.filter((d) => !hiddenDiskIds.includes(d.id));
+  const hiddenDisks = disks.filter((d) => hiddenDiskIds.includes(d.id));
 
   async function handleEject(disk: DiskInfo) {
     setEjecting((prev) => ({ ...prev, [disk.id]: true }));
@@ -46,10 +53,16 @@ export function DisksPanel() {
       {disks.length === 0 && (
         <p className="text-sm text-neutral-500">No volumes detected.</p>
       )}
+      {disks.length > 0 && visibleDisks.length === 0 && (
+        <p className="text-sm text-neutral-500">
+          Every detected drive is hidden -- unhide one below.
+        </p>
+      )}
       <ul className="flex flex-col gap-2">
-        {disks.map((disk) => {
+        {visibleDisks.map((disk) => {
           const isSource = sources.some((s) => s.diskId === disk.id);
           const isDestination = destinations.some((d) => d.diskId === disk.id);
+          const assigned = isSource || isDestination;
           const busy = isDiskBusy(disk, Object.values(jobs));
           return (
             <li
@@ -92,6 +105,19 @@ export function DisksPanel() {
                     {ejecting[disk.id] ? "Ejecting…" : "Eject"}
                   </button>
                 )}
+                <button
+                  type="button"
+                  disabled={assigned}
+                  title={
+                    assigned
+                      ? "Remove it as a Source/Destination first"
+                      : "Hide this drive from the list"
+                  }
+                  onClick={() => hideDisk(disk.id)}
+                  className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 disabled:opacity-40"
+                >
+                  Hide
+                </button>
               </div>
               {ejectError[disk.id] && (
                 <p className="text-[10px] text-red-400">{ejectError[disk.id]}</p>
@@ -100,6 +126,39 @@ export function DisksPanel() {
           );
         })}
       </ul>
+
+      {hiddenDisks.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => setShowHidden((v) => !v)}
+            className="w-fit text-[10px] uppercase tracking-wide text-neutral-500 hover:text-neutral-300"
+          >
+            {showHidden ? "Hide" : "Show"} hidden drives ({hiddenDisks.length})
+          </button>
+          {showHidden && (
+            <ul className="flex flex-col gap-1">
+              {hiddenDisks.map((disk) => (
+                <li
+                  key={disk.id}
+                  className="flex items-center justify-between gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs"
+                >
+                  <span className="truncate text-neutral-400">
+                    {disk.name} · {disk.mountPoint}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => unhideDisk(disk.id)}
+                    className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
+                  >
+                    Unhide
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </section>
   );
 }

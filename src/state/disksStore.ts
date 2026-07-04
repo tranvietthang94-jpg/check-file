@@ -7,6 +7,12 @@ interface DisksState {
   disks: DiskInfo[];
   sources: Endpoint[];
   destinations: Endpoint[];
+  /** Drives hidden from the Disks list -- e.g. the system drive that's never
+   * a real Source/Destination and just adds noise. Session-only, like every
+   * other setting in this app (nothing here persists across a restart yet). */
+  hiddenDiskIds: string[];
+  hideDisk: (diskId: string) => void;
+  unhideDisk: (diskId: string) => void;
   setDisks: (disks: DiskInfo[]) => void;
   addSource: (diskId: string) => void;
   addDestination: (diskId: string) => void;
@@ -26,6 +32,19 @@ export const useDisksStore = create<DisksState>((set, get) => ({
   disks: [],
   sources: [],
   destinations: [],
+  hiddenDiskIds: [],
+
+  hideDisk: (diskId) =>
+    set((state) =>
+      state.hiddenDiskIds.includes(diskId)
+        ? state
+        : { hiddenDiskIds: [...state.hiddenDiskIds, diskId] },
+    ),
+
+  unhideDisk: (diskId) =>
+    set((state) => ({
+      hiddenDiskIds: state.hiddenDiskIds.filter((id) => id !== diskId),
+    })),
 
   setDisks: (disks) => set({ disks }),
 
