@@ -1,1 +1,68 @@
 @import "tailwindcss";
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  src: url("/fonts/HankenGrotesk-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Variable.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * OffloadKit visual theme -- high-contrast "brutalist" DIT tool look
+ * (see DESIGN.md). Overrides Tailwind's default token values only; every
+ * component keeps using the same neutral, green, and red color utilities,
+ * plus rounded and font-mono, so this file is the single place the reskin lives.
+ */
+@theme {
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* neutral scale: 950 = page bg (pure black) up to 100 = brightest text */
+  --color-neutral-950: #000000;
+  --color-neutral-900: #111111;
+  --color-neutral-800: #444748;
+  --color-neutral-700: #8e9192;
+  --color-neutral-600: #6b6e6f;
+  --color-neutral-500: #9a9d9e;
+  --color-neutral-400: #c4c7c8;
+  --color-neutral-300: #e5e2e1;
+  --color-neutral-200: #e5e2e1;
+  --color-neutral-100: #e5e2e1;
+
+  /* success / verified / complete / primary action */
+  --color-green-500: #19ed60;
+  --color-green-400: #19ed60;
+
+  /* error / failed / mismatch text */
+  --color-red-400: #ffb4ab;
+
+  /* brutalist look: square corners everywhere (no rounded-* variant is
+     used in the codebase, but override the whole scale defensively) */
+  --radius: 0px;
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+}
+
+/* Native checkbox/radio controls have no Tailwind utility hook in the
+   codebase (they're plain <input type="checkbox|radio">) -- accent-color is
+   the only way to bring them into the brand palette instead of the
+   browser-default blue. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #19ed60;
+}
