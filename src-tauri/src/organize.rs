@@ -180,6 +180,13 @@ pub struct OrganizeSettings {
     /// so presets saved before this field existed still load.
     #[serde(default)]
     pub auto_label: AutoLabelSettings,
+    /// When true, Duplicate Detection only compares name + size, ignoring
+    /// modified time -- for workflows where an intermediate copy step (e.g.
+    /// re-wrapping, or a filesystem with coarse/unreliable mtimes) means a
+    /// genuinely-identical file's timestamp can't be trusted to match.
+    /// `#[serde(default)]` so presets saved before this field existed still load.
+    #[serde(default)]
+    pub skip_modification_date_check: bool,
 }
 
 impl Default for OrganizeSettings {
@@ -196,8 +203,44 @@ impl Default for OrganizeSettings {
             date_override: DateTimeOverride::default(),
             elements: Vec::new(),
             auto_label: AutoLabelSettings::default(),
+            skip_modification_date_check: false,
         }
     }
+}
+
+/// Filenames that are OS/filesystem housekeeping rather than shoot media
+/// (compared case-insensitively, since Windows and exFAT/FAT32 names are
+/// case-preserving but not case-sensitive).
+const JUNK_FILE_NAMES: &[&str] = &[".ds_store", "thumbs.db", "desktop.ini", ".apdisk"];
+
+/// Directory names whose entire contents are OS/filesystem housekeeping --
+/// matched against any path component, not just the top level, since these
+/// can appear nested under a source's own subfolders too.
+const JUNK_DIR_NAMES: &[&str] = &[
+    "system volume information",
+    "$recycle.bin",
+    ".spotlight-v100",
+    ".trashes",
+    ".fseventsd",
+    ".temporaryitems",
+];
+
+/// True for OS/filesystem housekeeping entries (Windows' `Thumbs.db` /
+/// `System Volume Information`, macOS' `.DS_Store` / Time Machine's local
+/// snapshot folders, etc.) that should never be copied as if they were shoot
+/// media. Unlike Selective Copy, this isn't user-configurable -- it's always
+/// applied, the same way OffShoot itself never surfaces these as a setting.
+pub fn is_os_junk_file(relative: &Path) -> bool {
+    let is_junk_file_name = relative
+        .file_name()
+        .map(|n| JUNK_FILE_NAMES.contains(&n.to_string_lossy().to_lowercase().as_str()))
+        == Some(true);
+    if is_junk_file_name {
+        return true;
+    }
+    relative
+        .components()
+        .any(|c| JUNK_DIR_NAMES.contains(&c.as_os_str().to_string_lossy().to_lowercase().as_str()))
 }
 
 /// A user-defined custom token (e.g. `{Location}`, `{Project}`) with the
@@ -723,5 +766,28 @@ mod tests {
 
         assert!(!dest.path().join("has_files").exists());
         assert!(dest.path().join("empty_dir").exists());
+    }
+
+    #[test]
+    fn os_junk_file_names_are_flagged_regardless_of_case() {
+        assert!(is_os_junk_file(Path::new(".DS_Store")));
+        assert!(is_os_junk_file(Path::new("Thumbs.db")));
+        assert!(is_os_junk_file(Path::new("THUMBS.DB")));
+        assert!(is_os_junk_file(Path::new("desktop.ini")));
+        assert!(is_os_junk_file(Path::new("CLIP/C0001/Thumbs.db")));
+    }
+
+    #[test]
+    fn files_nested_under_a_junk_directory_are_flagged() {
+        assert!(is_os_junk_file(Path::new(
+            "System Volume Information/IndexerVolumeGuid"
+        )));
+        assert!(is_os_junk_file(Path::new("$RECYCLE.BIN/S-1-5-21/file.mp4")));
+    }
+
+    #[test]
+    fn ordinary_shoot_media_is_never_flagged() {
+        assert!(!is_os_junk_file(Path::new("CLIP/C0001.MP4")));
+        assert!(!is_os_junk_file(Path::new("A-Cam/desktop_notes.txt")));
     }
 }

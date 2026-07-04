@@ -49,6 +49,8 @@ export interface OrganizeSettings {
   dateOverride: DateTimeOverride;
   elements: ElementDefinition[];
   autoLabel: AutoLabelSettings;
+  /** Duplicate Detection compares name + size only, ignoring modified time. */
+  skipModificationDateCheck: boolean;
 }
 
 export function defaultOrganizeSettings(): OrganizeSettings {
@@ -64,5 +66,6 @@ export function defaultOrganizeSettings(): OrganizeSettings {
     dateOverride: { mode: "automatic", manualDate: null, rolloverAt4am: false },
     elements: [],
     autoLabel: { enabled: false, template: "{Source Name}_{Counter}", startCounter: 1, counterPadding: 3 },
+    skipModificationDateCheck: false,
   };
 }

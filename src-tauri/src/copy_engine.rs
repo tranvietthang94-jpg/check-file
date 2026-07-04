@@ -440,6 +440,7 @@ pub fn run_copy_core(
         }
     }
     entries.retain(|e| organize::passes_selective_filter(&e.relative, &organize.selective_copy));
+    entries.retain(|e| !organize::is_os_junk_file(&e.relative));
 
     let total_files = entries.len() as u64;
     let total_bytes: u64 = entries.iter().map(|e| e.size).sum();
@@ -536,7 +537,12 @@ pub fn run_copy_core(
         // so a renamed file is never reported under its original name.
         let mut copy_display = relative_display.clone();
 
-        match dedup::resolve_duplicate(&dest_path, entry.size, entry.modified) {
+        match dedup::resolve_duplicate(
+            &dest_path,
+            entry.size,
+            entry.modified,
+            organize.skip_modification_date_check,
+        ) {
             Ok(DuplicateAction::Copy) => {}
             Ok(DuplicateAction::Skip) => {
                 tracker.add_bytes(entry.size, &relative_display);
@@ -1306,6 +1312,41 @@ mod tests {
         assert_eq!(outcome.files_copied, 1);
         assert!(dst_dir.path().join("clip.mp4").exists());
         assert!(!dst_dir.path().join("PRIVATE").exists());
+    }
+
+    #[test]
+    fn os_junk_files_are_never_copied() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("clip.mp4"), b"footage").unwrap();
+        fs::write(src_dir.path().join(".DS_Store"), b"finder metadata").unwrap();
+        fs::write(src_dir.path().join("Thumbs.db"), b"thumbnail cache").unwrap();
+        fs::create_dir_all(src_dir.path().join("System Volume Information")).unwrap();
+        fs::write(
+            src_dir.path().join("System Volume Information/IndexerVolumeGuid"),
+            b"junk",
+        )
+        .unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-junk".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        assert_eq!(outcome.files_copied, 1);
+        assert!(dst_dir.path().join("clip.mp4").exists());
+        assert!(!dst_dir.path().join(".DS_Store").exists());
+        assert!(!dst_dir.path().join("Thumbs.db").exists());
+        assert!(!dst_dir.path().join("System Volume Information").exists());
     }
 
     #[test]

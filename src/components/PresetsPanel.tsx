@@ -27,6 +27,7 @@ export function PresetsPanel() {
   const dateOverride = useOrganizeStore((s) => s.dateOverride);
   const elements = useOrganizeStore((s) => s.elements);
   const autoLabel = useOrganizeStore((s) => s.autoLabel);
+  const skipModificationDateCheck = useOrganizeStore((s) => s.skipModificationDateCheck);
   const loadOrganizeSettings = useOrganizeStore((s) => s.loadSettings);
 
   const [newName, setNewName] = useState("");
@@ -56,6 +57,7 @@ export function PresetsPanel() {
           dateOverride,
           elements,
           autoLabel,
+          skipModificationDateCheck,
         },
       });
       setNewName("");

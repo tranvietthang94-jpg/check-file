@@ -37,6 +37,7 @@ export function OrganizePanel() {
   const dateOverride = useOrganizeStore((s) => s.dateOverride);
   const elements = useOrganizeStore((s) => s.elements);
   const autoLabel = useOrganizeStore((s) => s.autoLabel);
+  const skipModificationDateCheck = useOrganizeStore((s) => s.skipModificationDateCheck);
 
   const setRenameTemplate = useOrganizeStore((s) => s.setRenameTemplate);
   const setFolderTemplate = useOrganizeStore((s) => s.setFolderTemplate);
@@ -58,6 +59,7 @@ export function OrganizePanel() {
   const setAutoLabelTemplate = useOrganizeStore((s) => s.setAutoLabelTemplate);
   const setAutoLabelStartCounter = useOrganizeStore((s) => s.setAutoLabelStartCounter);
   const setAutoLabelCounterPadding = useOrganizeStore((s) => s.setAutoLabelCounterPadding);
+  const setSkipModificationDateCheck = useOrganizeStore((s) => s.setSkipModificationDateCheck);
 
   const [patternsText, setPatternsText] = useState(selectiveCopy.patterns.join(", "));
   const [excludedExtText, setExcludedExtText] = useState(
@@ -109,6 +111,7 @@ export function OrganizePanel() {
       dateOverride,
       elements,
       autoLabel,
+      skipModificationDateCheck,
     },
     {
       ...PREVIEW_CONTEXT,
@@ -198,6 +201,24 @@ export function OrganizePanel() {
           className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
         />
       </div>
+
+      <label className="flex items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={skipModificationDateCheck}
+          onChange={(e) => setSkipModificationDateCheck(e.currentTarget.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+            Skip Modification Date Check
+          </span>
+          <span className="block text-neutral-500">
+            Duplicate Detection compares name + size only -- for workflows where a file's
+            modified time can't be trusted to still match.
+          </span>
+        </span>
+      </label>
 
       <div className="flex flex-col gap-1">
         <label className="flex items-center gap-2 text-xs">
