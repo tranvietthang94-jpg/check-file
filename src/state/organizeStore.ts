@@ -31,6 +31,7 @@ interface OrganizeState extends OrganizeSettings {
   setAutoLabelStartCounter: (value: number) => void;
   setAutoLabelCounterPadding: (value: number) => void;
   setSkipModificationDateCheck: (value: boolean) => void;
+  setAutoContinueOnBrokenMedia: (value: boolean) => void;
   /** Replaces every field at once -- used when applying a loaded preset. */
   loadSettings: (settings: OrganizeSettings) => void;
 }
@@ -99,5 +100,7 @@ export const useOrganizeStore = create<OrganizeState>((set) => ({
     })),
   setSkipModificationDateCheck: (skipModificationDateCheck) =>
     set({ skipModificationDateCheck }),
+  setAutoContinueOnBrokenMedia: (autoContinueOnBrokenMedia) =>
+    set({ autoContinueOnBrokenMedia }),
   loadSettings: (settings) => set({ ...settings }),
 }));

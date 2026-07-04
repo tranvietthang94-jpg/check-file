@@ -25,6 +25,13 @@ pub fn cancel_copy(registry: State<JobRegistry>, job_id: String) -> bool {
     registry.cancel(&job_id)
 }
 
+/// Resolves a pending Broken Media alert for `job_id`: `proceed = true`
+/// continues the copy, `false` aborts it (reported as cancelled).
+#[tauri::command]
+pub fn resolve_broken_media(registry: State<JobRegistry>, job_id: String, proceed: bool) {
+    registry.resolve_broken_media(&job_id, proceed);
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn start_transfer_group(

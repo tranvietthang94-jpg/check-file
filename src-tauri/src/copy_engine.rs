@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Instant, SystemTime};
 
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -39,6 +39,7 @@ pub const SCAN_EVENT: &str = "copy-scan";
 pub const PROGRESS_EVENT: &str = "copy-progress";
 pub const COMPLETE_EVENT: &str = "copy-complete";
 pub const CANCELLED_EVENT: &str = "copy-cancelled";
+pub const BROKEN_MEDIA_EVENT: &str = "copy-broken-media";
 
 const CHUNK_SIZE: usize = 1024 * 1024; // 1 MiB
 const PROGRESS_THROTTLE: std::time::Duration = std::time::Duration::from_millis(200);
@@ -139,12 +140,28 @@ pub struct CompletePayload {
     pub renamed_files: Vec<RenamedFile>,
     pub deleted_source_files: Vec<String>,
     pub move_delete_failed: Vec<FailedFile>,
+    /// Source-relative paths of every 0-byte file found on the source,
+    /// whether or not the job actually paused on them (empty when
+    /// `auto_continue_on_broken_media` was on or none were found).
+    pub broken_media_files: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelledPayload {
     pub job_id: String,
+}
+
+/// Emitted once, right before the copy loop starts, when one or more 0-byte
+/// files are found on the source -- a common symptom of a card that dropped
+/// out mid-recording. The job blocks (see `JobRegistry::wait_for_broken_media_decision`)
+/// until the frontend resolves it, unless `auto_continue_on_broken_media` skips
+/// the alert entirely.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokenMediaPayload {
+    pub job_id: String,
+    pub files: Vec<String>,
 }
 
 /// Result of a finished (or cancelled) copy job, Tauri-agnostic so it can be
@@ -170,6 +187,9 @@ pub struct CopyOutcome {
     /// still open elsewhere. Never treated as a copy failure: the data is
     /// safely at the destination either way.
     pub move_delete_failed: Vec<FailedFile>,
+    /// Source-relative paths of every 0-byte file found on the source. See
+    /// `BrokenMediaPayload`.
+    pub broken_media_files: Vec<String>,
 }
 
 /// Destination for scan/progress notifications. Kept separate from Tauri so
@@ -177,6 +197,54 @@ pub struct CopyOutcome {
 pub trait ProgressSink {
     fn on_scan(&self, total_files: u64, total_bytes: u64);
     fn on_progress(&self, payload: ProgressPayload);
+    /// Called once, before the copy loop starts, when broken (0-byte) source
+    /// files were found and the job isn't set to auto-continue past them.
+    /// Returns `true` to proceed with the copy, `false` to abort it. The
+    /// default (used by every sink that doesn't need real gating, e.g. tests)
+    /// always continues.
+    fn on_broken_media(&self, _files: &[String]) -> bool {
+        true
+    }
+}
+
+/// Blocks a job past a Broken Media alert until the frontend resolves it
+/// (Continue/Cancel), or its cancel flag fires while still waiting. Mirrors
+/// `crate::queue::JobQueue`'s condvar-gate shape, just keyed by decision
+/// instead of admission.
+#[derive(Default)]
+struct BrokenMediaGate {
+    decisions: Mutex<HashMap<String, Option<bool>>>,
+    condvar: Condvar,
+}
+
+impl BrokenMediaGate {
+    fn wait_for_decision(&self, job_id: &str, cancel_flag: &AtomicBool) -> bool {
+        let mut decisions = self.decisions.lock().unwrap();
+        decisions.insert(job_id.to_string(), None);
+        loop {
+            if cancel_flag.load(Ordering::SeqCst) {
+                decisions.remove(job_id);
+                return false;
+            }
+            if let Some(decision) = decisions.get(job_id).copied().flatten() {
+                decisions.remove(job_id);
+                return decision;
+            }
+            decisions = self.condvar.wait(decisions).unwrap();
+        }
+    }
+
+    fn resolve(&self, job_id: &str, proceed: bool) {
+        let mut decisions = self.decisions.lock().unwrap();
+        if let Some(slot) = decisions.get_mut(job_id) {
+            *slot = Some(proceed);
+        }
+        self.condvar.notify_all();
+    }
+
+    fn notify_all(&self) {
+        self.condvar.notify_all();
+    }
 }
 
 /// Tracks cancellation flags for in-flight copy jobs, keyed by job id,
@@ -187,6 +255,7 @@ pub struct JobRegistry {
     cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
     sleep_guard: crate::power::SleepGuard,
     job_queue: crate::queue::JobQueue,
+    broken_media_gate: BrokenMediaGate,
 }
 
 impl JobRegistry {
@@ -202,9 +271,11 @@ impl JobRegistry {
         match self.cancel_flags.lock().unwrap().get(job_id) {
             Some(flag) => {
                 flag.store(true, Ordering::SeqCst);
-                // Wakes it immediately if it's still waiting in the queue,
-                // instead of only noticing the cancellation once admitted.
+                // Wakes it immediately if it's still waiting in the queue or
+                // blocked on a Broken Media alert, instead of only noticing
+                // the cancellation once admitted / resolved.
                 self.job_queue.notify_all();
+                self.broken_media_gate.notify_all();
                 true
             }
             None => false,
@@ -232,6 +303,19 @@ impl JobRegistry {
     /// copying, or returns `false` early if cancelled while still waiting.
     pub fn wait_for_turn(&self, job_id: &str, group_id: &str, cancel_flag: &AtomicBool) -> bool {
         self.job_queue.wait_for_turn(job_id, group_id, cancel_flag)
+    }
+
+    /// Blocks until the frontend resolves the Broken Media alert for `job_id`
+    /// (via `resolve_broken_media`) or `cancel_flag` fires while still
+    /// waiting, in which case it returns `false` as if the user chose to abort.
+    pub fn wait_for_broken_media_decision(&self, job_id: &str, cancel_flag: &AtomicBool) -> bool {
+        self.broken_media_gate.wait_for_decision(job_id, cancel_flag)
+    }
+
+    /// Resolves a pending Broken Media alert: `true` continues the copy,
+    /// `false` aborts it. A no-op if no job is currently waiting under this id.
+    pub fn resolve_broken_media(&self, job_id: &str, proceed: bool) {
+        self.broken_media_gate.resolve(job_id, proceed);
     }
 }
 
@@ -429,6 +513,7 @@ pub fn run_copy_core(
                 mhl_entries: Vec::new(),
                 deleted_source_files: Vec::new(),
                 move_delete_failed: Vec::new(),
+                broken_media_files: Vec::new(),
             };
         }
     };
@@ -445,6 +530,34 @@ pub fn run_copy_core(
     let total_files = entries.len() as u64;
     let total_bytes: u64 = entries.iter().map(|e| e.size).sum();
     sink.on_scan(total_files, total_bytes);
+
+    // Broken Media Detection: a 0-byte file is almost always a card that
+    // dropped out mid-recording. Checked once up front (not that it would
+    // matter mid-loop -- an empty file copies instantly either way), so the
+    // alert can't be missed by copying past it before the user notices.
+    let broken_media_files: Vec<String> = entries
+        .iter()
+        .filter(|e| e.size == 0)
+        .map(|e| e.relative.display().to_string())
+        .collect();
+    if !broken_media_files.is_empty()
+        && !organize.auto_continue_on_broken_media
+        && !sink.on_broken_media(&broken_media_files)
+    {
+        return CopyOutcome {
+            cancelled: true,
+            files_copied: 0,
+            bytes_copied: 0,
+            failed_files: Vec::new(),
+            verified_files: Vec::new(),
+            skipped_files: Vec::new(),
+            renamed_files: Vec::new(),
+            mhl_entries: Vec::new(),
+            deleted_source_files: Vec::new(),
+            move_delete_failed: Vec::new(),
+            broken_media_files,
+        };
+    }
 
     let job_started = organize::effective_job_date(SystemTime::now(), &organize.date_override);
     let content_oldest = organize::compute_content_oldest_date(
@@ -734,12 +847,14 @@ pub fn run_copy_core(
         mhl_entries,
         deleted_source_files,
         move_delete_failed,
+        broken_media_files,
     }
 }
 
 struct TauriProgressSink<'a, R: Runtime> {
     app_handle: &'a AppHandle<R>,
     job_id: String,
+    cancel_flag: Arc<AtomicBool>,
 }
 
 impl<'a, R: Runtime> ProgressSink for TauriProgressSink<'a, R> {
@@ -756,6 +871,19 @@ impl<'a, R: Runtime> ProgressSink for TauriProgressSink<'a, R> {
 
     fn on_progress(&self, payload: ProgressPayload) {
         let _ = self.app_handle.emit(PROGRESS_EVENT, payload);
+    }
+
+    fn on_broken_media(&self, files: &[String]) -> bool {
+        let _ = self.app_handle.emit(
+            BROKEN_MEDIA_EVENT,
+            BrokenMediaPayload {
+                job_id: self.job_id.clone(),
+                files: files.to_vec(),
+            },
+        );
+        self.app_handle
+            .state::<JobRegistry>()
+            .wait_for_broken_media_decision(&self.job_id, &self.cancel_flag)
     }
 }
 
@@ -779,6 +907,7 @@ pub fn run_copy_job<R: Runtime>(
     let sink = TauriProgressSink {
         app_handle: &app_handle,
         job_id: job_id.clone(),
+        cancel_flag: cancel_flag.clone(),
     };
     let started_at = SystemTime::now();
     let outcome = run_copy_core(
@@ -815,6 +944,7 @@ pub fn run_copy_job<R: Runtime>(
                 renamed_files: outcome.renamed_files.clone(),
                 deleted_source_files: outcome.deleted_source_files.clone(),
                 move_delete_failed: outcome.move_delete_failed.clone(),
+                broken_media_files: outcome.broken_media_files.clone(),
             },
         );
     }
@@ -846,6 +976,7 @@ pub fn run_copy_job<R: Runtime>(
         renamed_files: outcome.renamed_files.clone(),
         deleted_source_files: outcome.deleted_source_files.clone(),
         move_delete_failed: outcome.move_delete_failed.clone(),
+        broken_media_files: outcome.broken_media_files.clone(),
         mhl_path,
         cancelled: outcome.cancelled,
     };
@@ -1599,6 +1730,111 @@ mod tests {
         assert_eq!(outcome.skipped_files.len(), 1);
         assert_eq!(outcome.deleted_source_files, vec!["clip.mp4".to_string()]);
         assert!(!src_file.exists());
+    }
+
+    #[test]
+    fn broken_media_is_detected_and_still_copied_when_the_sink_allows_it() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("good.mp4"), b"footage").unwrap();
+        fs::write(src_dir.path().join("dropped.mp4"), b"").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        // NoopSink's default `on_broken_media` continues, mirroring
+        // `auto_continue_on_broken_media` being on from the sink's point of view.
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-broken-media".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        assert_eq!(outcome.broken_media_files, vec!["dropped.mp4".to_string()]);
+        // Still copied -- Broken Media Detection is an alert, not a filter.
+        assert_eq!(outcome.files_copied, 2);
+        assert!(dst_dir.path().join("dropped.mp4").exists());
+    }
+
+    #[test]
+    fn broken_media_alert_can_abort_the_job_before_anything_is_copied() {
+        struct AbortingSink;
+        impl ProgressSink for AbortingSink {
+            fn on_scan(&self, _total_files: u64, _total_bytes: u64) {}
+            fn on_progress(&self, _payload: ProgressPayload) {}
+            fn on_broken_media(&self, _files: &[String]) -> bool {
+                false
+            }
+        }
+
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("good.mp4"), b"footage").unwrap();
+        fs::write(src_dir.path().join("dropped.mp4"), b"").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &AbortingSink,
+            "job-broken-media-abort".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        assert!(outcome.cancelled);
+        assert_eq!(outcome.files_copied, 0);
+        assert_eq!(outcome.broken_media_files, vec!["dropped.mp4".to_string()]);
+        assert!(
+            !dst_dir.path().join("good.mp4").exists(),
+            "aborting on the alert must happen before any file (even a healthy one) is copied"
+        );
+    }
+
+    #[test]
+    fn auto_continue_on_broken_media_skips_the_alert_entirely() {
+        struct PanicsIfAskedSink;
+        impl ProgressSink for PanicsIfAskedSink {
+            fn on_scan(&self, _total_files: u64, _total_bytes: u64) {}
+            fn on_progress(&self, _payload: ProgressPayload) {}
+            fn on_broken_media(&self, _files: &[String]) -> bool {
+                panic!("must not be called when auto_continue_on_broken_media is set");
+            }
+        }
+
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("dropped.mp4"), b"").unwrap();
+
+        let mut organize = OrganizeSettings::default();
+        organize.auto_continue_on_broken_media = true;
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &PanicsIfAskedSink,
+            "job-broken-media-auto".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &organize,
+            false,
+        );
+
+        // Still recorded for the transfer log/report even though nobody was asked.
+        assert_eq!(outcome.broken_media_files, vec!["dropped.mp4".to_string()]);
+        assert_eq!(outcome.files_copied, 1);
     }
 
     #[test]

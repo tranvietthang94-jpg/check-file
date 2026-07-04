@@ -38,6 +38,7 @@ export function OrganizePanel() {
   const elements = useOrganizeStore((s) => s.elements);
   const autoLabel = useOrganizeStore((s) => s.autoLabel);
   const skipModificationDateCheck = useOrganizeStore((s) => s.skipModificationDateCheck);
+  const autoContinueOnBrokenMedia = useOrganizeStore((s) => s.autoContinueOnBrokenMedia);
 
   const setRenameTemplate = useOrganizeStore((s) => s.setRenameTemplate);
   const setFolderTemplate = useOrganizeStore((s) => s.setFolderTemplate);
@@ -60,6 +61,7 @@ export function OrganizePanel() {
   const setAutoLabelStartCounter = useOrganizeStore((s) => s.setAutoLabelStartCounter);
   const setAutoLabelCounterPadding = useOrganizeStore((s) => s.setAutoLabelCounterPadding);
   const setSkipModificationDateCheck = useOrganizeStore((s) => s.setSkipModificationDateCheck);
+  const setAutoContinueOnBrokenMedia = useOrganizeStore((s) => s.setAutoContinueOnBrokenMedia);
 
   const [patternsText, setPatternsText] = useState(selectiveCopy.patterns.join(", "));
   const [excludedExtText, setExcludedExtText] = useState(
@@ -112,6 +114,7 @@ export function OrganizePanel() {
       elements,
       autoLabel,
       skipModificationDateCheck,
+      autoContinueOnBrokenMedia,
     },
     {
       ...PREVIEW_CONTEXT,
@@ -216,6 +219,24 @@ export function OrganizePanel() {
           <span className="block text-neutral-500">
             Duplicate Detection compares name + size only -- for workflows where a file's
             modified time can't be trusted to still match.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={autoContinueOnBrokenMedia}
+          onChange={(e) => setAutoContinueOnBrokenMedia(e.currentTarget.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+            Auto-Continue on Broken Media
+          </span>
+          <span className="block text-neutral-500">
+            Skips the alert when a 0-byte file is found on the source and copies anyway. Off by
+            default, so a dropped card gets flagged before anything is copied.
           </span>
         </span>
       </label>

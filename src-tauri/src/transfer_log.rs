@@ -37,6 +37,11 @@ pub struct TransferLogEntry {
     pub deleted_source_files: Vec<String>,
     #[serde(default)]
     pub move_delete_failed: Vec<FailedFile>,
+    /// Source-relative paths of 0-byte files found on the source (Broken
+    /// Media Detection). `#[serde(default)]` so logs saved before this
+    /// existed still load.
+    #[serde(default)]
+    pub broken_media_files: Vec<String>,
     pub mhl_path: Option<String>,
     /// True when this entry records a Stopped (cancelled) transfer rather
     /// than one that ran to completion -- Resume starts a fresh job over the
@@ -119,6 +124,7 @@ mod tests {
             renamed_files: Vec::new(),
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
+            broken_media_files: Vec::new(),
             mhl_path: Some("D:\\Offload\\20260703_200005.mhl".to_string()),
             cancelled: false,
         }

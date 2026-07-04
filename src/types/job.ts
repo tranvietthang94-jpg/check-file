@@ -47,6 +47,9 @@ export interface TransferJob {
   renamedFiles: RenamedFile[];
   deletedSourceFiles: string[];
   moveDeleteFailed: FailedFile[];
+  brokenMediaFiles: string[];
+  /** Non-null while a Broken Media alert is awaiting Continue/Cancel from the user. */
+  pendingBrokenMedia: string[] | null;
 }
 
 export interface ScanEventPayload {
@@ -75,8 +78,14 @@ export interface CompleteEventPayload {
   renamedFiles: RenamedFile[];
   deletedSourceFiles: string[];
   moveDeleteFailed: FailedFile[];
+  brokenMediaFiles: string[];
 }
 
 export interface CancelledEventPayload {
   jobId: string;
+}
+
+export interface BrokenMediaEventPayload {
+  jobId: string;
+  files: string[];
 }

@@ -51,6 +51,8 @@ export interface OrganizeSettings {
   autoLabel: AutoLabelSettings;
   /** Duplicate Detection compares name + size only, ignoring modified time. */
   skipModificationDateCheck: boolean;
+  /** Skips the Broken Media (0-byte file) alert and just proceeds with the copy. */
+  autoContinueOnBrokenMedia: boolean;
 }
 
 export function defaultOrganizeSettings(): OrganizeSettings {
@@ -67,5 +69,6 @@ export function defaultOrganizeSettings(): OrganizeSettings {
     elements: [],
     autoLabel: { enabled: false, template: "{Source Name}_{Counter}", startCounter: 1, counterPadding: 3 },
     skipModificationDateCheck: false,
+    autoContinueOnBrokenMedia: false,
   };
 }

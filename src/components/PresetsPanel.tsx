@@ -28,6 +28,7 @@ export function PresetsPanel() {
   const elements = useOrganizeStore((s) => s.elements);
   const autoLabel = useOrganizeStore((s) => s.autoLabel);
   const skipModificationDateCheck = useOrganizeStore((s) => s.skipModificationDateCheck);
+  const autoContinueOnBrokenMedia = useOrganizeStore((s) => s.autoContinueOnBrokenMedia);
   const loadOrganizeSettings = useOrganizeStore((s) => s.loadSettings);
 
   const [newName, setNewName] = useState("");
@@ -58,6 +59,7 @@ export function PresetsPanel() {
           elements,
           autoLabel,
           skipModificationDateCheck,
+          autoContinueOnBrokenMedia,
         },
       });
       setNewName("");

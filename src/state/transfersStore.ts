@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  BrokenMediaEventPayload,
   CancelledEventPayload,
   CompleteEventPayload,
   ProgressEventPayload,
@@ -14,6 +15,8 @@ interface TransfersState {
   applyProgress: (payload: ProgressEventPayload) => void;
   applyComplete: (payload: CompleteEventPayload) => void;
   applyCancelled: (payload: CancelledEventPayload) => void;
+  applyBrokenMedia: (payload: BrokenMediaEventPayload) => void;
+  clearBrokenMediaAlert: (jobId: string) => void;
 }
 
 function updateJob(
@@ -65,6 +68,7 @@ export const useTransfersStore = create<TransfersState>((set) => ({
         renamedFiles: payload.renamedFiles,
         deletedSourceFiles: payload.deletedSourceFiles,
         moveDeleteFailed: payload.moveDeleteFailed,
+        brokenMediaFiles: payload.brokenMediaFiles,
         currentFile: "",
       }),
     })),
@@ -74,6 +78,19 @@ export const useTransfersStore = create<TransfersState>((set) => ({
       jobs: updateJob(state.jobs, payload.jobId, {
         status: "cancelled",
         currentFile: "",
+        pendingBrokenMedia: null,
       }),
+    })),
+
+  applyBrokenMedia: (payload) =>
+    set((state) => ({
+      jobs: updateJob(state.jobs, payload.jobId, {
+        pendingBrokenMedia: payload.files,
+      }),
+    })),
+
+  clearBrokenMediaAlert: (jobId) =>
+    set((state) => ({
+      jobs: updateJob(state.jobs, jobId, { pendingBrokenMedia: null }),
     })),
 }));

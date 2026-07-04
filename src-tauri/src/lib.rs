@@ -28,6 +28,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_disks,
             commands::cancel_copy,
+            commands::resolve_broken_media,
             commands::start_transfer_group,
             commands::start_media_scan,
             commands::save_preset,

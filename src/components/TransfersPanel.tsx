@@ -8,6 +8,7 @@ interface TransfersPanelProps {
   onCancelJob: (jobId: string) => void;
   onCancelGroup: (group: TransferGroup) => void;
   onResumeJob: (job: TransferJob) => void;
+  onResolveBrokenMedia: (jobId: string, proceed: boolean) => void;
 }
 
 const STATUS_COLOR: Record<TransferJob["status"], string> = {
@@ -37,10 +38,12 @@ function JobRow({
   job,
   onCancel,
   onResume,
+  onResolveBrokenMedia,
 }: {
   job: TransferJob;
   onCancel: (jobId: string) => void;
   onResume: (job: TransferJob) => void;
+  onResolveBrokenMedia: (jobId: string, proceed: boolean) => void;
 }) {
   const pct = job.totalBytes > 0 ? Math.min(100, (job.bytesCopied / job.totalBytes) * 100) : 0;
 
@@ -95,6 +98,30 @@ function JobRow({
         </span>
       </div>
 
+      {job.pendingBrokenMedia && (
+        <div className="flex flex-col gap-2 rounded border border-orange-700 bg-orange-950/40 px-2 py-2 text-xs">
+          <p className="text-orange-300" title={job.pendingBrokenMedia.join(", ")}>
+            ⚠ {job.pendingBrokenMedia.length} broken (0-byte) file(s) found on the source — likely a
+            card that dropped out mid-recording.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onResolveBrokenMedia(job.id, true)}
+              className="rounded border border-neutral-700 px-2 py-1 text-neutral-200"
+            >
+              Continue Anyway
+            </button>
+            <button
+              type="button"
+              onClick={() => onResolveBrokenMedia(job.id, false)}
+              className="rounded border border-neutral-700 px-2 py-1 text-red-400"
+            >
+              Cancel Job
+            </button>
+          </div>
+        </div>
+      )}
       {job.verifiedFiles.length > 0 && (
         <p className="text-xs text-green-500">
           {job.verificationMode === "sourceAndDestination"
@@ -138,6 +165,11 @@ function JobRow({
           {job.moveDeleteFailed[0].message}
         </p>
       )}
+      {!job.pendingBrokenMedia && job.brokenMediaFiles.length > 0 && (
+        <p className="text-xs text-orange-400" title={job.brokenMediaFiles.join(", ")}>
+          {job.brokenMediaFiles.length} broken (0-byte) file(s) were found on the source
+        </p>
+      )}
     </li>
   );
 }
@@ -148,6 +180,7 @@ export function TransfersPanel({
   onCancelJob,
   onCancelGroup,
   onResumeJob,
+  onResolveBrokenMedia,
 }: TransfersPanelProps) {
   return (
     <section className="flex flex-col gap-2">
@@ -186,7 +219,13 @@ export function TransfersPanel({
 
               <ul className="flex flex-col gap-2">
                 {groupJobs.map((job) => (
-                  <JobRow key={job.id} job={job} onCancel={onCancelJob} onResume={onResumeJob} />
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    onCancel={onCancelJob}
+                    onResume={onResumeJob}
+                    onResolveBrokenMedia={onResolveBrokenMedia}
+                  />
                 ))}
                 {group.mode === "cascade" &&
                   groupJobs.length < group.destinationLabels.length &&

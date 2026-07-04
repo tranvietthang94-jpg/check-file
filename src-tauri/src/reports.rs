@@ -490,6 +490,7 @@ mod tests {
             renamed_files: Vec::new(),
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
+            broken_media_files: Vec::new(),
             mhl_path: None,
             cancelled: false,
         }

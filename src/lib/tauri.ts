@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { DiskInfo } from "../types/disk";
 import type {
+  BrokenMediaEventPayload,
   CancelledEventPayload,
   ChecksumAlgorithm,
   CompleteEventPayload,
@@ -84,6 +85,17 @@ export function onCopyCancelled(
   callback: (payload: CancelledEventPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<CancelledEventPayload>("copy-cancelled", (event) => callback(event.payload));
+}
+
+export function onBrokenMediaDetected(
+  callback: (payload: BrokenMediaEventPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<BrokenMediaEventPayload>("copy-broken-media", (event) => callback(event.payload));
+}
+
+/** Resolves a pending Broken Media alert: `proceed = true` continues the copy, `false` aborts it. */
+export function resolveBrokenMedia(jobId: string, proceed: boolean): Promise<void> {
+  return invoke<void>("resolve_broken_media", { jobId, proceed });
 }
 
 export function startMediaScan(folder: string): Promise<string> {

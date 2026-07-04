@@ -187,6 +187,13 @@ pub struct OrganizeSettings {
     /// `#[serde(default)]` so presets saved before this field existed still load.
     #[serde(default)]
     pub skip_modification_date_check: bool,
+    /// When a 0-byte ("broken") file is found on the source, the job normally
+    /// pauses and waits for the user to confirm before copying anything --
+    /// when true, it proceeds automatically instead. `#[serde(default)]` so
+    /// presets saved before this field existed still load (defaulting to the
+    /// safer "ask first" behavior).
+    #[serde(default)]
+    pub auto_continue_on_broken_media: bool,
 }
 
 impl Default for OrganizeSettings {
@@ -204,6 +211,7 @@ impl Default for OrganizeSettings {
             elements: Vec::new(),
             auto_label: AutoLabelSettings::default(),
             skip_modification_date_check: false,
+            auto_continue_on_broken_media: false,
         }
     }
 }

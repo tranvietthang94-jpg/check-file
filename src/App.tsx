@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   cancelCopy,
   listDisks,
+  onBrokenMediaDetected,
   onCopyCancelled,
   onCopyComplete,
   onCopyProgress,
@@ -10,6 +11,7 @@ import {
   onMediaScanComplete,
   onMediaScanItem,
   onTransferGroupJobAdded,
+  resolveBrokenMedia,
   startMediaScan,
   startTransferGroup,
 } from "./lib/tauri";
@@ -62,6 +64,8 @@ function App() {
   const applyProgress = useTransfersStore((s) => s.applyProgress);
   const applyComplete = useTransfersStore((s) => s.applyComplete);
   const applyCancelled = useTransfersStore((s) => s.applyCancelled);
+  const applyBrokenMedia = useTransfersStore((s) => s.applyBrokenMedia);
+  const clearBrokenMediaAlert = useTransfersStore((s) => s.clearBrokenMediaAlert);
 
   const groups = useGroupsStore((s) => s.groups);
   const setGroupMeta = useGroupsStore((s) => s.setGroupMeta);
@@ -94,6 +98,7 @@ function App() {
   const organizeElements = useOrganizeStore((s) => s.elements);
   const organizeAutoLabel = useOrganizeStore((s) => s.autoLabel);
   const organizeSkipModificationDateCheck = useOrganizeStore((s) => s.skipModificationDateCheck);
+  const organizeAutoContinueOnBrokenMedia = useOrganizeStore((s) => s.autoContinueOnBrokenMedia);
   // Assembled fresh each render from the primitive selections above --
   // deliberately not itself a selector return value, since Zustand's
   // useSyncExternalStore compares each render's snapshot by reference and a
@@ -111,6 +116,7 @@ function App() {
     elements: organizeElements,
     autoLabel: organizeAutoLabel,
     skipModificationDateCheck: organizeSkipModificationDateCheck,
+    autoContinueOnBrokenMedia: organizeAutoContinueOnBrokenMedia,
   };
 
   useEffect(() => {
@@ -150,6 +156,8 @@ function App() {
         renamedFiles: [],
         deletedSourceFiles: [],
         moveDeleteFailed: [],
+        brokenMediaFiles: [],
+        pendingBrokenMedia: null,
       });
     }
 
@@ -203,6 +211,7 @@ function App() {
       onTransferGroupJobAdded(handleGroupJobAdded),
       onMediaScanItem(handleMediaScanItem),
       onMediaScanComplete(handleMediaScanComplete),
+      onBrokenMediaDetected(applyBrokenMedia),
     ];
 
     return () => {
@@ -213,6 +222,7 @@ function App() {
     applyProgress,
     applyComplete,
     applyCancelled,
+    applyBrokenMedia,
     addJob,
     addJobToGroup,
     addMediaEntry,
@@ -253,6 +263,11 @@ function App() {
 
   function handleCancelGroup(group: TransferGroup) {
     group.jobIds.forEach((jobId) => handleCancelJob(jobId));
+  }
+
+  function handleResolveBrokenMedia(jobId: string, proceed: boolean) {
+    clearBrokenMediaAlert(jobId);
+    resolveBrokenMedia(jobId, proceed).catch(console.error);
   }
 
   // Resume = a fresh Parallel transfer over the exact same source →
@@ -323,6 +338,7 @@ function App() {
           onCancelJob={handleCancelJob}
           onCancelGroup={handleCancelGroup}
           onResumeJob={handleResumeJob}
+          onResolveBrokenMedia={handleResolveBrokenMedia}
         />
         <TransferLogPanel onViewClips={handleBrowse} />
         <ReportsPanel />
