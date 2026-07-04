@@ -24,7 +24,10 @@ export function ReportsPanel() {
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [logoFileName, setLogoFileName] = useState<string | null>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
   const [includeThumbnails, setIncludeThumbnails] = useState(false);
+  const [logoInputKey, setLogoInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,16 +38,33 @@ export function ReportsPanel() {
     );
   }
 
+  const MAX_LOGO_BYTES = 5 * 1024 * 1024;
+
   async function handleLogoChange(file: File | undefined) {
     if (!file) {
-      setLogoDataUrl(null);
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setLogoError("Logo image is too large (max 5 MB) -- pick a smaller file.");
+      setLogoInputKey((k) => k + 1);
       return;
     }
     try {
       setLogoDataUrl(await readAsDataUrl(file));
+      setLogoFileName(file.name);
+      setLogoError(null);
     } catch {
       setLogoDataUrl(null);
+      setLogoFileName(null);
+      setLogoError("Couldn't read that image -- try a different file.");
     }
+  }
+
+  function clearLogo() {
+    setLogoDataUrl(null);
+    setLogoFileName(null);
+    setLogoError(null);
+    setLogoInputKey((k) => k + 1);
   }
 
   async function handleGenerate() {
@@ -115,16 +135,43 @@ export function ReportsPanel() {
               />
             </label>
 
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="text-[10px] uppercase tracking-wide text-neutral-500">Logo</span>
-              <input
-                type="file"
-                accept="image/*"
-                title="Report logo image"
-                onChange={(e) => handleLogoChange(e.currentTarget.files?.[0])}
-                className="text-xs"
-              />
-            </label>
+            <div className="flex flex-col gap-1 text-xs">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                  Logo (optional)
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    key={logoInputKey}
+                    type="file"
+                    accept="image/*"
+                    title="Report logo image"
+                    onChange={(e) => handleLogoChange(e.currentTarget.files?.[0])}
+                    className="text-xs"
+                  />
+                  {logoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={clearLogo}
+                      className="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:text-neutral-200"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </label>
+              {logoDataUrl && (
+                <div className="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1">
+                  <img
+                    src={logoDataUrl}
+                    alt="Logo preview"
+                    className="h-8 max-w-[120px] object-contain"
+                  />
+                  <span className="truncate text-[10px] text-neutral-500">{logoFileName}</span>
+                </div>
+              )}
+              {logoError && <span className="text-[10px] text-red-400">{logoError}</span>}
+            </div>
           </div>
 
           <label className="flex flex-col gap-1 text-xs">
