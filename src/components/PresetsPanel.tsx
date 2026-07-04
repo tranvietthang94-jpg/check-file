@@ -26,6 +26,7 @@ export function PresetsPanel() {
   const contentDateExcludedExtensions = useOrganizeStore((s) => s.contentDateExcludedExtensions);
   const dateOverride = useOrganizeStore((s) => s.dateOverride);
   const elements = useOrganizeStore((s) => s.elements);
+  const autoLabel = useOrganizeStore((s) => s.autoLabel);
   const loadOrganizeSettings = useOrganizeStore((s) => s.loadSettings);
 
   const [newName, setNewName] = useState("");
@@ -54,6 +55,7 @@ export function PresetsPanel() {
           contentDateExcludedExtensions,
           dateOverride,
           elements,
+          autoLabel,
         },
       });
       setNewName("");

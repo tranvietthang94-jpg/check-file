@@ -64,6 +64,34 @@ pub struct DateTimeOverride {
     pub rollover_at_4am: bool,
 }
 
+/// Auto-generates a Source's label from a template as it's added, instead of
+/// requiring the user to type one -- purely persisted configuration here
+/// (mirrors OffShoot's "part of the active Preset" behavior); the actual
+/// rendering happens in the frontend alongside the rest of the token engine,
+/// since a label is attached to a `disksStore` endpoint, not a transferred
+/// file, and never reaches this Rust engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoLabelSettings {
+    pub enabled: bool,
+    /// Renders the label -- typically `{Source Name}` and/or `{Counter}`.
+    pub template: String,
+    /// First value the per-source counter renders as.
+    pub start_counter: u32,
+    pub counter_padding: u8,
+}
+
+impl Default for AutoLabelSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            template: "{Source Name}_{Counter}".to_string(),
+            start_counter: 1,
+            counter_padding: 3,
+        }
+    }
+}
+
 impl Default for DateTimeOverride {
     fn default() -> Self {
         Self {
@@ -148,6 +176,10 @@ pub struct OrganizeSettings {
     /// presets saved before this field existed still load.
     #[serde(default)]
     pub elements: Vec<ElementDefinition>,
+    /// Auto-generates each new Source's label from a template. `#[serde(default)]`
+    /// so presets saved before this field existed still load.
+    #[serde(default)]
+    pub auto_label: AutoLabelSettings,
 }
 
 impl Default for OrganizeSettings {
@@ -163,6 +195,7 @@ impl Default for OrganizeSettings {
             content_date_excluded_extensions: Vec::new(),
             date_override: DateTimeOverride::default(),
             elements: Vec::new(),
+            auto_label: AutoLabelSettings::default(),
         }
     }
 }

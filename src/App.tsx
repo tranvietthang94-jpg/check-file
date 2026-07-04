@@ -90,6 +90,7 @@ function App() {
   );
   const organizeDateOverride = useOrganizeStore((s) => s.dateOverride);
   const organizeElements = useOrganizeStore((s) => s.elements);
+  const organizeAutoLabel = useOrganizeStore((s) => s.autoLabel);
   // Assembled fresh each render from the primitive selections above --
   // deliberately not itself a selector return value, since Zustand's
   // useSyncExternalStore compares each render's snapshot by reference and a
@@ -105,6 +106,7 @@ function App() {
     contentDateExcludedExtensions: organizeContentDateExcludedExtensions,
     dateOverride: organizeDateOverride,
     elements: organizeElements,
+    autoLabel: organizeAutoLabel,
   };
 
   useEffect(() => {

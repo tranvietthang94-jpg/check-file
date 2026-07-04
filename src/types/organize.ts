@@ -27,6 +27,16 @@ export interface ElementDefinition {
   value: string;
 }
 
+/** Auto-generates each new Source's label from a template as it's added. */
+export interface AutoLabelSettings {
+  enabled: boolean;
+  /** Renders the label -- typically `{Source Name}` and/or `{Counter}`. */
+  template: string;
+  /** First value the per-source counter renders as. */
+  startCounter: number;
+  counterPadding: number;
+}
+
 export interface OrganizeSettings {
   renameTemplate: string | null;
   folderTemplate: string | null;
@@ -38,6 +48,7 @@ export interface OrganizeSettings {
   contentDateExcludedExtensions: string[];
   dateOverride: DateTimeOverride;
   elements: ElementDefinition[];
+  autoLabel: AutoLabelSettings;
 }
 
 export function defaultOrganizeSettings(): OrganizeSettings {
@@ -52,5 +63,6 @@ export function defaultOrganizeSettings(): OrganizeSettings {
     contentDateExcludedExtensions: [],
     dateOverride: { mode: "automatic", manualDate: null, rolloverAt4am: false },
     elements: [],
+    autoLabel: { enabled: false, template: "{Source Name}_{Counter}", startCounter: 1, counterPadding: 3 },
   };
 }

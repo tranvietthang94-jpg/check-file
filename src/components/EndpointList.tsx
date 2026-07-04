@@ -1,5 +1,11 @@
 import type { DiskInfo, Endpoint } from "../types/disk";
 
+/** Blue for a manually-typed label, a white outline for an Auto Label -- mirrors OffShoot. */
+function labelBorderClass(endpoint: Endpoint): string {
+  if (endpoint.label === "") return "border-neutral-700";
+  return endpoint.isAutoLabel ? "border-white" : "border-blue-500";
+}
+
 interface EndpointListProps {
   title: string;
   endpoints: Endpoint[];
@@ -46,8 +52,9 @@ export function EndpointList({
                   value={endpoint.label}
                   onChange={(e) => onLabelChange(endpoint.diskId, e.currentTarget.value)}
                   placeholder="Label…"
+                  title={endpoint.isAutoLabel ? "Auto-generated label" : "Label"}
                   autoComplete="off"
-                  className="w-24 shrink-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
+                  className={`w-24 shrink-0 rounded border bg-neutral-950 px-2 py-1 text-xs ${labelBorderClass(endpoint)}`}
                 />
                 {onBrowse && (
                   <button

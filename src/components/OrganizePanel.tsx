@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useOrganizeStore } from "../state/organizeStore";
-import { effectiveJobDate, previewDestinationPath } from "../lib/tokenEngine";
+import { useDisksStore } from "../state/disksStore";
+import { effectiveJobDate, previewDestinationPath, renderTemplate } from "../lib/tokenEngine";
 import type { DateOverrideMode, SelectiveCopyMode } from "../types/organize";
 
 const TOKEN_REFERENCE =
@@ -35,6 +36,7 @@ export function OrganizePanel() {
   const contentDateExcludedExtensions = useOrganizeStore((s) => s.contentDateExcludedExtensions);
   const dateOverride = useOrganizeStore((s) => s.dateOverride);
   const elements = useOrganizeStore((s) => s.elements);
+  const autoLabel = useOrganizeStore((s) => s.autoLabel);
 
   const setRenameTemplate = useOrganizeStore((s) => s.setRenameTemplate);
   const setFolderTemplate = useOrganizeStore((s) => s.setFolderTemplate);
@@ -52,6 +54,10 @@ export function OrganizePanel() {
   const removeElement = useOrganizeStore((s) => s.removeElement);
   const setElementValue = useOrganizeStore((s) => s.setElementValue);
   const clearElementValues = useOrganizeStore((s) => s.clearElementValues);
+  const setAutoLabelEnabled = useOrganizeStore((s) => s.setAutoLabelEnabled);
+  const setAutoLabelTemplate = useOrganizeStore((s) => s.setAutoLabelTemplate);
+  const setAutoLabelStartCounter = useOrganizeStore((s) => s.setAutoLabelStartCounter);
+  const setAutoLabelCounterPadding = useOrganizeStore((s) => s.setAutoLabelCounterPadding);
 
   const [patternsText, setPatternsText] = useState(selectiveCopy.patterns.join(", "));
   const [excludedExtText, setExcludedExtText] = useState(
@@ -82,6 +88,14 @@ export function OrganizePanel() {
     });
   }
 
+  const autoLabelPreview = renderTemplate(autoLabel.template, {
+    ...PREVIEW_CONTEXT,
+    counter: autoLabel.startCounter,
+    counterPadding: autoLabel.counterPadding,
+    jobStarted: effectiveJobDate(NOW, dateOverride),
+    elements,
+  });
+
   const preview = previewDestinationPath(
     {
       renameTemplate,
@@ -94,6 +108,7 @@ export function OrganizePanel() {
       contentDateExcludedExtensions,
       dateOverride,
       elements,
+      autoLabel,
     },
     {
       ...PREVIEW_CONTEXT,
@@ -374,6 +389,76 @@ export function OrganizePanel() {
         <p className="text-[10px] leading-relaxed text-neutral-600">
           Type the token (e.g. {"{Location}"}) into a Rename or Folder template above to use it.
         </p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={autoLabel.enabled}
+            onChange={(e) => {
+              setAutoLabelEnabled(e.currentTarget.checked);
+              useDisksStore.getState().recomputeAutoLabels();
+            }}
+          />
+          <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+            Auto Label new sources
+          </span>
+        </label>
+
+        {autoLabel.enabled && (
+          <>
+            <input
+              value={autoLabel.template}
+              onChange={(e) => {
+                setAutoLabelTemplate(e.currentTarget.value);
+                useDisksStore.getState().recomputeAutoLabels();
+              }}
+              placeholder="{Source Name}_{Counter}"
+              autoComplete="off"
+              className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+            />
+            <p
+              className="truncate rounded border border-neutral-800 bg-neutral-900 px-2 py-1 font-mono text-[10px] text-neutral-400"
+              title={autoLabelPreview}
+            >
+              Preview: {autoLabelPreview}
+            </p>
+            <div className="flex items-center gap-3 text-xs">
+              <label className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                  Start at
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  value={autoLabel.startCounter}
+                  onChange={(e) => {
+                    setAutoLabelStartCounter(Number.parseInt(e.currentTarget.value, 10));
+                    useDisksStore.getState().recomputeAutoLabels();
+                  }}
+                  className="w-16 rounded border border-neutral-700 bg-neutral-950 px-2 py-1"
+                />
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                  Padding
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={autoLabel.counterPadding}
+                  onChange={(e) => {
+                    setAutoLabelCounterPadding(Number.parseInt(e.currentTarget.value, 10));
+                    useDisksStore.getState().recomputeAutoLabels();
+                  }}
+                  className="w-14 rounded border border-neutral-700 bg-neutral-950 px-2 py-1"
+                />
+              </label>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );

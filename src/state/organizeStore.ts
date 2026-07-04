@@ -26,8 +26,17 @@ interface OrganizeState extends OrganizeSettings {
   setElementValue: (name: string, value: string) => void;
   /** Resets every element's value to "" but keeps the definitions -- mirrors OffShoot's "Clear". */
   clearElementValues: () => void;
+  setAutoLabelEnabled: (enabled: boolean) => void;
+  setAutoLabelTemplate: (template: string) => void;
+  setAutoLabelStartCounter: (value: number) => void;
+  setAutoLabelCounterPadding: (value: number) => void;
   /** Replaces every field at once -- used when applying a loaded preset. */
   loadSettings: (settings: OrganizeSettings) => void;
+}
+
+/** Shared by every `AutoLabelSettings` setter -- keeps counters sane the same way `setCounterPadding` does for Organize. */
+function clampCounter(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.trunc(value) || min));
 }
 
 /** Empty string collapses to `null` -- "no template" is the actual default state. */
@@ -75,5 +84,17 @@ export const useOrganizeStore = create<OrganizeState>((set) => ({
     })),
   clearElementValues: () =>
     set((state) => ({ elements: state.elements.map((e) => ({ ...e, value: "" })) })),
+  setAutoLabelEnabled: (enabled) =>
+    set((state) => ({ autoLabel: { ...state.autoLabel, enabled } })),
+  setAutoLabelTemplate: (template) =>
+    set((state) => ({ autoLabel: { ...state.autoLabel, template } })),
+  setAutoLabelStartCounter: (value) =>
+    set((state) => ({
+      autoLabel: { ...state.autoLabel, startCounter: clampCounter(value, 0, 999_999) },
+    })),
+  setAutoLabelCounterPadding: (value) =>
+    set((state) => ({
+      autoLabel: { ...state.autoLabel, counterPadding: clampCounter(value, 1, 8) },
+    })),
   loadSettings: (settings) => set({ ...settings }),
 }));
