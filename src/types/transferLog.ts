@@ -25,4 +25,5 @@ export interface TransferLogEntry {
   deletedSourceFiles: string[];
   moveDeleteFailed: FailedFile[];
   mhlPath: string | null;
+  cancelled: boolean;
 }

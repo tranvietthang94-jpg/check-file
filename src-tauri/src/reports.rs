@@ -491,6 +491,7 @@ mod tests {
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
             mhl_path: None,
+            cancelled: false,
         }
     }
 

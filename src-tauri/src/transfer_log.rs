@@ -38,6 +38,13 @@ pub struct TransferLogEntry {
     #[serde(default)]
     pub move_delete_failed: Vec<FailedFile>,
     pub mhl_path: Option<String>,
+    /// True when this entry records a Stopped (cancelled) transfer rather
+    /// than one that ran to completion -- Resume starts a fresh job over the
+    /// same source/destination, which relies on Duplicate Detection to skip
+    /// whatever this entry already got through. `#[serde(default)]` so logs
+    /// saved before Stop & Resume existed (all of them completions) still load.
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 /// Tauri-agnostic core so it can be unit tested with a plain temp directory,
@@ -113,6 +120,7 @@ mod tests {
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
             mhl_path: Some("D:\\Offload\\20260703_200005.mhl".to_string()),
+            cancelled: false,
         }
     }
 
@@ -194,5 +202,9 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert!(logs[0].deleted_source_files.is_empty());
         assert!(logs[0].move_delete_failed.is_empty());
+        assert!(
+            !logs[0].cancelled,
+            "a log from before Stop & Resume existed must default to a completed transfer"
+        );
     }
 }

@@ -34,6 +34,7 @@ import { TransferLogPanel } from "./components/TransferLogPanel";
 import { pathLabel, formatBytes } from "./lib/format";
 import { notifyTransfer } from "./lib/notify";
 import type { DiskInfo, Endpoint } from "./types/disk";
+import type { TransferJob } from "./types/job";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/media";
 import "./App.css";
@@ -252,6 +253,28 @@ function App() {
     group.jobIds.forEach((jobId) => handleCancelJob(jobId));
   }
 
+  // Resume = a fresh Parallel transfer over the exact same source →
+  // destination the job already used, with the same Verification/Checksum
+  // settings it was started with. Duplicate Detection (and, when the
+  // algorithm matches, MHL Awareness) then naturally skips whatever that job
+  // already got through, so only what's missing gets copied. Move is
+  // deliberately never re-enabled here -- it shouldn't silently start
+  // deleting sources as a side effect of a Resume click; redo it from Build
+  // Transfer if that's really what's wanted.
+  async function handleResumeJob(job: TransferJob) {
+    const groupId = await startTransferGroup(
+      job.sourcePath,
+      [job.destinationPath],
+      "parallel",
+      job.verificationMode,
+      job.checksumAlgorithm,
+      job.sourceLabel,
+      organize,
+      false,
+    );
+    setGroupMeta(groupId, "parallel", job.sourceLabel, [job.destinationLabel]);
+  }
+
   async function handleBrowse(path: string) {
     const scanId = await startMediaScan(path);
     startMediaScanState(scanId, path);
@@ -297,6 +320,7 @@ function App() {
           jobs={jobs}
           onCancelJob={handleCancelJob}
           onCancelGroup={handleCancelGroup}
+          onResumeJob={handleResumeJob}
         />
         <TransferLogPanel onViewClips={handleBrowse} />
         <ReportsPanel />

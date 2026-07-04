@@ -7,6 +7,7 @@ interface TransfersPanelProps {
   jobs: Record<string, TransferJob>;
   onCancelJob: (jobId: string) => void;
   onCancelGroup: (group: TransferGroup) => void;
+  onResumeJob: (job: TransferJob) => void;
 }
 
 const STATUS_COLOR: Record<TransferJob["status"], string> = {
@@ -25,7 +26,22 @@ function isActive(job: TransferJob | undefined): boolean {
   return !!job && (job.status === "queued" || job.status === "copying");
 }
 
-function JobRow({ job, onCancel }: { job: TransferJob; onCancel: (jobId: string) => void }) {
+/** Stopped outright, or finished but with files that never made it -- the
+ * same three triggers OffShoot documents for Resume (stopped, failed,
+ * completed with warnings). */
+function canResume(job: TransferJob): boolean {
+  return job.status === "cancelled" || (job.status === "complete" && job.failedFiles.length > 0);
+}
+
+function JobRow({
+  job,
+  onCancel,
+  onResume,
+}: {
+  job: TransferJob;
+  onCancel: (jobId: string) => void;
+  onResume: (job: TransferJob) => void;
+}) {
   const pct = job.totalBytes > 0 ? Math.min(100, (job.bytesCopied / job.totalBytes) * 100) : 0;
 
   return (
@@ -39,17 +55,29 @@ function JobRow({ job, onCancel }: { job: TransferJob; onCancel: (jobId: string)
           )}
           {job.destinationLabel}
         </span>
-        {isActive(job) ? (
-          <button
-            type="button"
-            onClick={() => onCancel(job.id)}
-            className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-red-400"
-          >
-            Cancel
-          </button>
-        ) : (
-          <span className="shrink-0 text-xs capitalize text-neutral-400">{job.status}</span>
-        )}
+        <span className="flex shrink-0 items-center gap-2">
+          {canResume(job) && (
+            <button
+              type="button"
+              onClick={() => onResume(job)}
+              title="Start a fresh copy of the same source → destination -- already-offloaded files are skipped automatically"
+              className="rounded border border-neutral-700 px-2 py-1 text-xs text-blue-400"
+            >
+              Resume
+            </button>
+          )}
+          {isActive(job) ? (
+            <button
+              type="button"
+              onClick={() => onCancel(job.id)}
+              className="rounded border border-neutral-700 px-2 py-1 text-xs text-red-400"
+            >
+              Cancel
+            </button>
+          ) : (
+            <span className="text-xs capitalize text-neutral-400">{job.status}</span>
+          )}
+        </span>
       </div>
 
       <div className="h-1.5 w-full overflow-hidden rounded bg-neutral-800">
@@ -114,7 +142,13 @@ function JobRow({ job, onCancel }: { job: TransferJob; onCancel: (jobId: string)
   );
 }
 
-export function TransfersPanel({ groups, jobs, onCancelJob, onCancelGroup }: TransfersPanelProps) {
+export function TransfersPanel({
+  groups,
+  jobs,
+  onCancelJob,
+  onCancelGroup,
+  onResumeJob,
+}: TransfersPanelProps) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
@@ -152,7 +186,7 @@ export function TransfersPanel({ groups, jobs, onCancelJob, onCancelGroup }: Tra
 
               <ul className="flex flex-col gap-2">
                 {groupJobs.map((job) => (
-                  <JobRow key={job.id} job={job} onCancel={onCancelJob} />
+                  <JobRow key={job.id} job={job} onCancel={onCancelJob} onResume={onResumeJob} />
                 ))}
                 {group.mode === "cascade" &&
                   groupJobs.length < group.destinationLabels.length &&

@@ -811,33 +811,39 @@ pub fn run_copy_job<R: Runtime>(
                 move_delete_failed: outcome.move_delete_failed.clone(),
             },
         );
-
-        let mhl_path = mhl::write_mhl(&destination, &outcome.mhl_entries, started_at, finished_at)
-            .ok()
-            .flatten()
-            .map(|p| p.display().to_string());
-
-        let log_entry = TransferLogEntry {
-            job_id: job_id.clone(),
-            source_name,
-            source: source.display().to_string(),
-            destination: destination.display().to_string(),
-            verification_mode,
-            checksum_algorithm,
-            started_at: mhl::iso8601(started_at),
-            finished_at: mhl::iso8601(finished_at),
-            files_copied: outcome.files_copied,
-            bytes_copied: outcome.bytes_copied,
-            failed_files: outcome.failed_files.clone(),
-            verified_files: outcome.verified_files.clone(),
-            skipped_files: outcome.skipped_files.clone(),
-            renamed_files: outcome.renamed_files.clone(),
-            deleted_source_files: outcome.deleted_source_files.clone(),
-            move_delete_failed: outcome.move_delete_failed.clone(),
-            mhl_path,
-        };
-        let _ = transfer_log::save_log(&app_handle, &log_entry);
     }
+
+    // Recorded either way (Stop & Resume): even a Stopped job already has
+    // real, verified work worth an audit trail and an MHL for what it did
+    // manage to copy -- Resume is just a fresh job over the same
+    // source/destination afterward, relying on Duplicate Detection (and,
+    // when the algorithm matches, MHL Awareness) to skip what's already here.
+    let mhl_path = mhl::write_mhl(&destination, &outcome.mhl_entries, started_at, finished_at)
+        .ok()
+        .flatten()
+        .map(|p| p.display().to_string());
+
+    let log_entry = TransferLogEntry {
+        job_id: job_id.clone(),
+        source_name,
+        source: source.display().to_string(),
+        destination: destination.display().to_string(),
+        verification_mode,
+        checksum_algorithm,
+        started_at: mhl::iso8601(started_at),
+        finished_at: mhl::iso8601(finished_at),
+        files_copied: outcome.files_copied,
+        bytes_copied: outcome.bytes_copied,
+        failed_files: outcome.failed_files.clone(),
+        verified_files: outcome.verified_files.clone(),
+        skipped_files: outcome.skipped_files.clone(),
+        renamed_files: outcome.renamed_files.clone(),
+        deleted_source_files: outcome.deleted_source_files.clone(),
+        move_delete_failed: outcome.move_delete_failed.clone(),
+        mhl_path,
+        cancelled: outcome.cancelled,
+    };
+    let _ = transfer_log::save_log(&app_handle, &log_entry);
 
     app_handle.state::<JobRegistry>().remove(&job_id);
     outcome

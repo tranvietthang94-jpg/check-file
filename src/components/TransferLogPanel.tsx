@@ -23,7 +23,10 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
   return (
     <li className="flex flex-col gap-1 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">{entry.sourceName}</span>
+        <span className="font-medium">
+          {entry.sourceName}
+          {entry.cancelled && <span className="ml-2 text-orange-400">Stopped</span>}
+        </span>
         <span className="text-neutral-500">{formatTimestamp(entry.finishedAt)}</span>
       </div>
       <div className="truncate text-neutral-500" title={`${entry.source} -> ${entry.destination}`}>
