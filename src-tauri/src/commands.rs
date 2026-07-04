@@ -8,6 +8,7 @@ use crate::copy_engine::{JobRegistry, VerificationMode};
 use crate::disks::{enumerate_disks, DiskInfo};
 use crate::eject;
 use crate::media_scan;
+use crate::mhl::{self, MhlVerifyReport};
 use crate::organize::OrganizeSettings;
 use crate::presets::{self, Preset};
 use crate::queue::QueueMode;
@@ -100,4 +101,18 @@ pub fn generate_report(app_handle: AppHandle, request: ReportRequest) -> Result<
         .collect();
     let path = reports::save_report(&app_handle, &entries, &request).map_err(|e| e.to_string())?;
     Ok(path.display().to_string())
+}
+
+/// Verifies one `.mhl` file against the real files on disk, without running
+/// a transfer -- the "double-click an MHL to verify it" action.
+#[tauri::command]
+pub fn verify_mhl(path: String) -> Result<MhlVerifyReport, String> {
+    mhl::verify_mhl_file(&PathBuf::from(path)).map_err(|e| e.to_string())
+}
+
+/// Verifies every `.mhl` file found directly inside `folder` -- the "verify
+/// all MHLs on this drive/folder" batch action.
+#[tauri::command]
+pub fn verify_mhls_in_folder(folder: String) -> Result<Vec<MhlVerifyReport>, String> {
+    mhl::verify_mhls_in_folder(&PathBuf::from(folder)).map_err(|e| e.to_string())
 }

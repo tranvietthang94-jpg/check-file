@@ -467,6 +467,17 @@ pub fn run_copy_core(
     // Transfer mode's size-only check -- Move only ever acts on a file once
     // it's been through an actual hash comparison.
     let can_move = move_after_transfer && compute_hash;
+    // MHL Awareness: if the source already carries an MHL (e.g. from a camera
+    // system or a prior offload) recording a matching size/mtime for this
+    // exact checksum algorithm, its checksum can stand in for hashing the
+    // source again -- the file itself still gets copied and, in
+    // Source & Destination mode, the destination is still independently
+    // re-read and compared, so no integrity guarantee is weakened.
+    let source_mhl_index = if compute_hash {
+        mhl::load_source_mhl_index(source)
+    } else {
+        HashMap::new()
+    };
     let mut tracker = ProgressTracker::new(sink, job_id, total_bytes, total_files);
     let mut buffer = vec![0u8; CHUNK_SIZE];
     let mut failed_files = Vec::new();
@@ -566,6 +577,15 @@ pub fn run_copy_core(
             }
         }
 
+        let known_hash = mhl::reusable_checksum(
+            &source_mhl_index,
+            &entry.relative,
+            entry.size,
+            entry.modified,
+            checksum_algorithm,
+        );
+        let compute_hash_for_this_file = compute_hash && known_hash.is_none();
+
         let mut attempt = 1;
         let copy_result = loop {
             // A failed attempt may have streamed some bytes into the
@@ -581,7 +601,7 @@ pub fn run_copy_core(
                 &mut tracker,
                 &copy_display,
                 checksum_algorithm,
-                compute_hash,
+                compute_hash_for_this_file,
                 entry.modified,
             );
             if result.is_err() && should_retry_copy(attempt, cancel_flag.load(Ordering::SeqCst)) {
@@ -596,6 +616,9 @@ pub fn run_copy_core(
         match copy_result {
             Ok(CopyFileOutcome::Completed { source_hash }) => {
                 tracker.finish_file();
+                // Falls back to the MHL-Awareness checksum when this file's
+                // hashing was skipped because it was already known-good.
+                let source_hash = source_hash.or_else(|| known_hash.clone());
                 // Feeds the MHL: `None` means Transfer mode (size-only entry, no
                 // hash computed); a failed/mismatched verification below clears
                 // `record_in_mhl` so a bad copy is never recorded as trustworthy.
@@ -1331,6 +1354,100 @@ mod tests {
         assert!(
             outcome.mhl_entries[0].checksum.is_none(),
             "Transfer mode never computes a hash, so the MHL entry must be size-only"
+        );
+    }
+
+    #[test]
+    fn mhl_awareness_reuses_a_matching_source_checksum_instead_of_rehashing() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+        let meta = fs::metadata(&src_file).unwrap();
+
+        // Plants a source MHL recording a deliberately *wrong* checksum: if
+        // the copy engine's MHL Awareness reuses it instead of rehashing the
+        // real bytes, the recorded checksum will be this bogus value rather
+        // than the file's true XXH64.
+        let fake_entry = MhlFileEntry {
+            relative_path: "clip.mp4".to_string(),
+            size: meta.len(),
+            modified: meta.modified().unwrap(),
+            checksum: Some("deadbeefdeadbeef".to_string()),
+            algorithm: ChecksumAlgorithm::Xxh64,
+            hashed_at: SystemTime::now(),
+        };
+        mhl::write_mhl(src_dir.path(), &[fake_entry], SystemTime::now(), SystemTime::now()).unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-mhl-awareness".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Source,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        let clip_verification = outcome
+            .verified_files
+            .iter()
+            .find(|f| f.path == "clip.mp4")
+            .expect("clip.mp4 should have been copied and verified");
+        assert_eq!(
+            clip_verification.checksum, "deadbeefdeadbeef",
+            "the reused MHL checksum should be recorded, proving the source wasn't rehashed"
+        );
+    }
+
+    #[test]
+    fn mhl_awareness_ignores_a_source_mhl_entry_whose_size_no_longer_matches() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+        let meta = fs::metadata(&src_file).unwrap();
+
+        // The MHL's recorded size no longer matches the live file, so its
+        // (bogus) checksum must be ignored and the real content rehashed.
+        let stale_entry = MhlFileEntry {
+            relative_path: "clip.mp4".to_string(),
+            size: meta.len() + 1,
+            modified: meta.modified().unwrap(),
+            checksum: Some("deadbeefdeadbeef".to_string()),
+            algorithm: ChecksumAlgorithm::Xxh64,
+            hashed_at: SystemTime::now(),
+        };
+        mhl::write_mhl(src_dir.path(), &[stale_entry], SystemTime::now(), SystemTime::now()).unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-mhl-awareness-stale".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Source,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+        );
+
+        let clip_verification = outcome
+            .verified_files
+            .iter()
+            .find(|f| f.path == "clip.mp4")
+            .expect("clip.mp4 should have been copied and verified");
+        assert_eq!(
+            clip_verification.checksum,
+            checksum::hash_file(&src_file, ChecksumAlgorithm::Xxh64).unwrap(),
+            "a stale MHL entry must never override a freshly computed checksum"
         );
     }
 

@@ -22,7 +22,7 @@ pub enum DuplicateAction {
     Rename(PathBuf),
 }
 
-fn mtimes_close(a: SystemTime, b: SystemTime) -> bool {
+pub(crate) fn mtimes_close(a: SystemTime, b: SystemTime) -> bool {
     let diff = a.duration_since(b).or_else(|_| b.duration_since(a));
     matches!(diff, Ok(d) if d <= MTIME_TOLERANCE)
 }

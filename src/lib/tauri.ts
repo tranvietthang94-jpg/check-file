@@ -14,6 +14,7 @@ import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/me
 import type { OrganizeSettings } from "../types/organize";
 import type { Preset } from "../types/preset";
 import type { ReportRequest } from "../types/report";
+import type { MhlVerifyReport } from "../types/mhl";
 import type { TransferLogEntry } from "../types/transferLog";
 import type { QueueMode } from "../types/queue";
 
@@ -134,4 +135,14 @@ export function setQueueMode(mode: QueueMode): Promise<void> {
 /** Returns the absolute path to the generated report HTML file. */
 export function generateReport(request: ReportRequest): Promise<string> {
   return invoke<string>("generate_report", { request });
+}
+
+/** Verifies one .mhl file against the real files on disk, without a transfer. */
+export function verifyMhl(path: string): Promise<MhlVerifyReport> {
+  return invoke<MhlVerifyReport>("verify_mhl", { path });
+}
+
+/** Verifies every .mhl file found directly inside `folder`. */
+export function verifyMhlsInFolder(folder: string): Promise<MhlVerifyReport[]> {
+  return invoke<MhlVerifyReport[]>("verify_mhls_in_folder", { folder });
 }

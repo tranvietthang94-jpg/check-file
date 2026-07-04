@@ -37,7 +37,9 @@ pub fn run() {
             commands::eject_disk,
             commands::set_prevent_sleep,
             commands::set_queue_mode,
-            commands::generate_report
+            commands::generate_report,
+            commands::verify_mhl,
+            commands::verify_mhls_in_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

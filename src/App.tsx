@@ -29,6 +29,7 @@ import { MediaBrowser } from "./components/MediaBrowser";
 import { OrganizePanel } from "./components/OrganizePanel";
 import { PresetsPanel } from "./components/PresetsPanel";
 import { ReportsPanel } from "./components/ReportsPanel";
+import { MhlVerifyPanel } from "./components/MhlVerifyPanel";
 import { TransferLogPanel } from "./components/TransferLogPanel";
 import { pathLabel, formatBytes } from "./lib/format";
 import { notifyTransfer } from "./lib/notify";
@@ -299,6 +300,7 @@ function App() {
         />
         <TransferLogPanel onViewClips={handleBrowse} />
         <ReportsPanel />
+        <MhlVerifyPanel />
         {activeScan && (
           <MediaBrowser
             folder={activeScan.folder}
