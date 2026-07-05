@@ -59,6 +59,7 @@ fn spawn_job<R: Runtime>(
     source_name: String,
     organize: OrganizeSettings,
     move_after_transfer: bool,
+    move_same_volume: bool,
 ) -> String {
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = app_handle.state::<JobRegistry>().register(job_id.clone());
@@ -104,6 +105,7 @@ fn spawn_job<R: Runtime>(
             source_name,
             organize,
             move_after_transfer,
+            move_same_volume,
         );
     });
 
@@ -124,6 +126,7 @@ pub fn start_transfer_group<R: Runtime>(
     source_name: String,
     organize: OrganizeSettings,
     move_after_transfer: bool,
+    move_same_volume: bool,
 ) -> String {
     let group_id = Uuid::new_v4().to_string();
 
@@ -132,8 +135,12 @@ pub fn start_transfer_group<R: Runtime>(
             // Every destination reads the same source independently -- with
             // more than one, there's no single point where it's safe to
             // delete the source without racing the other destination's read.
-            // Move only ever applies to the unambiguous single-destination case.
-            let effective_move = move_after_transfer && destinations.len() == 1;
+            // Move (and the same-volume fast-move rename, which deletes the
+            // source just as surely) only ever applies to the unambiguous
+            // single-destination case.
+            let single_destination = destinations.len() == 1;
+            let effective_move = move_after_transfer && single_destination;
+            let effective_same_volume_move = move_same_volume && single_destination;
             for destination in destinations {
                 spawn_job(
                     &app_handle,
@@ -146,6 +153,7 @@ pub fn start_transfer_group<R: Runtime>(
                     source_name.clone(),
                     organize.clone(),
                     effective_move,
+                    effective_same_volume_move,
                 );
             }
         }
@@ -211,6 +219,7 @@ pub fn start_transfer_group<R: Runtime>(
                     source_name_thread.clone(),
                     organize_thread.clone(),
                     move_after_transfer,
+                    move_same_volume,
                 );
 
                 if !should_cascade_continue(&outcome) {
@@ -220,7 +229,8 @@ pub fn start_transfer_group<R: Runtime>(
                 for destination in rest {
                     // Hop 2's "source" is the primary destination we just
                     // wrote and verified -- it must never be deleted, so this
-                    // is never Move-eligible regardless of the caller's setting.
+                    // is never Move- or same-volume-move-eligible regardless
+                    // of the caller's settings.
                     spawn_job(
                         &app_handle_thread,
                         &group_id_thread,
@@ -231,6 +241,7 @@ pub fn start_transfer_group<R: Runtime>(
                         checksum_algorithm,
                         source_name_thread.clone(),
                         organize_thread.clone(),
+                        false,
                         false,
                     );
                 }
@@ -277,6 +288,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false,
         );
         assert!(should_cascade_continue(&hop1));
 
@@ -290,6 +302,7 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             "Source",
             &OrganizeSettings::default(),
+            false,
             false,
         );
 

@@ -511,7 +511,18 @@ pub fn run_copy_core(
     source_name: &str,
     organize: &OrganizeSettings,
     move_after_transfer: bool,
+    move_same_volume: bool,
 ) -> CopyOutcome {
+    // OffShoot's "Don't copy but move data when a Source and Destination are
+    // located on the same volume": when both resolve to the same physical
+    // disk, an `fs::rename` relocates the file instantly with no byte
+    // duplication -- there's nothing to "copy" since it's already the same
+    // bytes on the same filesystem. Checked once per job, not per file, since
+    // the source/destination roots don't change mid-job.
+    let same_volume_move_active = move_same_volume
+        && crate::disks::volume_signature(&source.display().to_string())
+            .zip(crate::disks::volume_signature(&destination.display().to_string()))
+            .is_some_and(|(a, b)| a == b);
     let mut entries = match scan_source(source) {
         Ok(e) => e,
         Err(err) => {
@@ -720,6 +731,57 @@ pub fn run_copy_core(
             checksum_algorithm,
         );
         let compute_hash_for_this_file = compute_hash && known_hash.is_none();
+
+        if same_volume_move_active {
+            // Still hash the file first (a plain read, same as any other
+            // verification mode would do) so Reports/MHLs get a real
+            // checksum -- only the write side skips the redundant
+            // copy-then-delete dance a cross-volume Move needs.
+            let hash = if compute_hash_for_this_file {
+                match checksum::hash_file(&entry.absolute, checksum_algorithm) {
+                    Ok(h) => Some(h),
+                    Err(err) => {
+                        failed_files.push(FailedFile {
+                            path: copy_display.clone(),
+                            message: format!("could not hash file before moving: {err}"),
+                        });
+                        continue;
+                    }
+                }
+            } else {
+                known_hash.clone()
+            };
+            match fs::rename(&entry.absolute, &dest_path) {
+                Ok(()) => {
+                    tracker.add_bytes(entry.size, &copy_display);
+                    tracker.finish_file();
+                    if let Some(h) = &hash {
+                        verified_files.push(VerifiedFile {
+                            path: copy_display.clone(),
+                            checksum: h.clone(),
+                            algorithm: checksum_algorithm,
+                        });
+                    }
+                    mhl_entries.push(MhlFileEntry {
+                        relative_path: copy_display.clone(),
+                        size: entry.size,
+                        modified: entry.modified,
+                        checksum: hash,
+                        algorithm: checksum_algorithm,
+                        hashed_at: SystemTime::now(),
+                    });
+                    deleted_source_files.push(copy_display);
+                }
+                Err(err) => {
+                    failed_files.push(FailedFile {
+                        path: copy_display,
+                        message: format!("could not move file on the same volume: {err}"),
+                    });
+                }
+            }
+            continue;
+        }
+
         let staging_path = staging_path_for(&dest_path);
 
         let mut attempt = 1;
@@ -943,6 +1005,7 @@ pub fn run_copy_job<R: Runtime>(
     source_name: String,
     organize: OrganizeSettings,
     move_after_transfer: bool,
+    move_same_volume: bool,
 ) -> CopyOutcome {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
@@ -961,6 +1024,7 @@ pub fn run_copy_job<R: Runtime>(
         &source_name,
         &organize,
         move_after_transfer,
+        move_same_volume,
     );
     let finished_at = SystemTime::now();
 
@@ -1075,6 +1139,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(!outcome.cancelled);
@@ -1109,6 +1174,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.cancelled);
@@ -1144,6 +1210,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1189,6 +1256,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         // `write_mhl` drops the source MHL directly into `src_dir`, so the
@@ -1225,6 +1293,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.files_copied, 0);
@@ -1262,6 +1331,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         // The final flush always emits at least one progress event.
@@ -1288,6 +1358,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(!outcome.cancelled);
@@ -1316,6 +1387,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1345,6 +1417,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1375,6 +1448,7 @@ mod tests {
                 "Source",
                 &OrganizeSettings::default(),
                 false,
+                false, // move_same_volume
             )
         };
 
@@ -1415,6 +1489,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1466,6 +1541,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         let dest_modified = fs::metadata(dst_dir.path().join("clip.mp4"))
@@ -1503,6 +1579,7 @@ mod tests {
             "A-Cam",
             &organize,
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1537,6 +1614,7 @@ mod tests {
             "Source",
             &organize,
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1572,6 +1650,7 @@ mod tests {
             "Source",
             &organize,
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1605,6 +1684,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1632,6 +1712,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -1660,6 +1741,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -1703,6 +1785,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1749,6 +1832,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         let clip_verification = outcome
@@ -1782,6 +1866,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             true,
+            false, // move_same_volume
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1793,6 +1878,75 @@ mod tests {
             b"camera footage",
             "the destination copy must still be intact"
         );
+    }
+
+    #[test]
+    fn same_volume_move_renames_instead_of_copying_and_still_records_a_checksum() {
+        // Both tempdirs land under the OS temp root, i.e. the same real
+        // volume in any normal test environment -- exercising the actual
+        // `disks::volume_signature` comparison, not a stub.
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-same-volume-move".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Source,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+            true, // move_same_volume
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert!(!src_file.exists(), "the source file should have been renamed away");
+        assert_eq!(outcome.deleted_source_files, vec!["clip.mp4".to_string()]);
+        assert_eq!(
+            fs::read(dst_dir.path().join("clip.mp4")).unwrap(),
+            b"camera footage"
+        );
+        assert_eq!(
+            outcome.verified_files.first().map(|f| &f.checksum),
+            Some(&checksum::hash_file(dst_dir.path().join("clip.mp4").as_path(), ChecksumAlgorithm::Xxh64).unwrap()),
+            "a checksum should still be recorded even though the write side was a rename"
+        );
+    }
+
+    #[test]
+    fn same_volume_move_is_a_noop_fast_path_when_disabled() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-same-volume-move-disabled".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Source,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+            false, // move_same_volume
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert!(
+            src_file.exists(),
+            "with the setting off, a same-volume transfer must still copy (not move) the source"
+        );
+        assert!(outcome.deleted_source_files.is_empty());
     }
 
     #[test]
@@ -1817,6 +1971,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             true,
+            false, // move_same_volume
         );
 
         assert!(outcome.deleted_source_files.is_empty());
@@ -1842,6 +1997,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
         assert!(src_file.exists());
 
@@ -1859,6 +2015,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             true,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.skipped_files.len(), 1);
@@ -1887,6 +2044,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.broken_media_files, vec!["dropped.mp4".to_string()]);
@@ -1923,6 +2081,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             false,
+            false, // move_same_volume
         );
 
         assert!(outcome.cancelled);
@@ -1964,6 +2123,7 @@ mod tests {
             "Source",
             &organize,
             false,
+            false, // move_same_volume
         );
 
         // Still recorded for the transfer log/report even though nobody was asked.
@@ -1995,6 +2155,7 @@ mod tests {
             "Source",
             &OrganizeSettings::default(),
             true,
+            false, // move_same_volume
         );
 
         assert_eq!(outcome.failed_files.len(), 1);

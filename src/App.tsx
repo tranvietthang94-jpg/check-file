@@ -87,6 +87,7 @@ function App() {
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
   const desktopNotifications = useSettingsStore((s) => s.desktopNotifications);
+  const moveSameVolume = useSettingsStore((s) => s.moveSameVolume);
 
   const refreshTransferLogs = useTransferLogStore((s) => s.refresh);
 
@@ -256,6 +257,7 @@ function App() {
       endpointLabel(source, disks),
       organize,
       moveAfterTransfer,
+      moveSameVolume,
     );
     setGroupMeta(
       groupId,
@@ -318,6 +320,7 @@ function App() {
       job.sourceLabel,
       organize,
       false,
+      moveSameVolume,
     );
     setGroupMeta(groupId, "parallel", job.sourceLabel, [job.destinationLabel]);
   }

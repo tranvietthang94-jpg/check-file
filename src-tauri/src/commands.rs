@@ -53,6 +53,7 @@ pub fn start_transfer_group(
     source_name: String,
     organize: OrganizeSettings,
     move_after_transfer: bool,
+    move_same_volume: bool,
 ) -> String {
     cascade::start_transfer_group(
         app_handle,
@@ -64,6 +65,7 @@ pub fn start_transfer_group(
         source_name,
         organize,
         move_after_transfer,
+        move_same_volume,
     )
 }
 

@@ -43,6 +43,7 @@ export function startTransferGroup(
   sourceName: string,
   organize: OrganizeSettings,
   moveAfterTransfer: boolean,
+  moveSameVolume: boolean,
 ): Promise<string> {
   return invoke<string>("start_transfer_group", {
     source,
@@ -53,6 +54,7 @@ export function startTransferGroup(
     sourceName,
     organize,
     moveAfterTransfer,
+    moveSameVolume,
   });
 }
 

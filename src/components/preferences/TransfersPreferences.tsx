@@ -37,12 +37,36 @@ export function TransfersPreferences() {
   const verificationMode = useSettingsStore((s) => s.verificationMode);
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
   const queueMode = useSettingsStore((s) => s.queueMode);
+  const moveSameVolume = useSettingsStore((s) => s.moveSameVolume);
   const setVerificationMode = useSettingsStore((s) => s.setVerificationMode);
   const setChecksumAlgorithm = useSettingsStore((s) => s.setChecksumAlgorithm);
   const setQueueMode = useSettingsStore((s) => s.setQueueMode);
+  const setMoveSameVolume = useSettingsStore((s) => s.setMoveSameVolume);
 
   return (
     <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
+          Transfer
+        </h3>
+        <label className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={moveSameVolume}
+            onChange={(e) => setMoveSameVolume(e.currentTarget.checked)}
+            className="mt-0.5"
+          />
+          <span className="flex flex-col">
+            <span className="font-medium">
+              Don't copy but move data when a Source and Destination are on the same volume
+            </span>
+            <span className="text-neutral-500">
+              Relocates the file instantly instead of duplicating it, when possible.
+            </span>
+          </span>
+        </label>
+      </section>
+
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
           Verification
