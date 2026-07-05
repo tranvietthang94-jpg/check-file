@@ -16,11 +16,14 @@ jobs:
       matrix:
         include:
           - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
+            target: 'aarch64-apple-darwin'
+            ffmpeg_asset: 'darwin-arm64'
           - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
+            target: 'x86_64-apple-darwin'
+            ffmpeg_asset: 'darwin-x64'
           - platform: 'windows-latest'
-            args: ''
+            target: 'x86_64-pc-windows-msvc'
+            ffmpeg_asset: 'win32-x64'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -34,10 +37,34 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.target }}
 
       - name: Install frontend dependencies
         run: npm ci
+
+      # Bundles ffmpeg/ffprobe into the installer as Tauri sidecars so Media
+      # Browser thumbnails/metadata work with no external dependency on the
+      # end user's machine. Source: eugeneware/ffmpeg-static (GitHub-hosted,
+      # the same static builds behind the widely-used `ffmpeg-static`/
+      # `ffprobe-static` npm packages) -- Windows build is GPL (gyan.dev
+      # essentials), macOS builds are LGPL-only; both are fine to bundle as a
+      # separately-invoked subprocess (no linking), with LICENSE/README
+      # fetched alongside for compliance.
+      - name: Fetch bundled ffmpeg/ffprobe sidecar binaries
+        shell: bash
+        env:
+          FFMPEG_ASSET: ${{ matrix.ffmpeg_asset }}
+          RUST_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p src-tauri/binaries
+          base="https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1"
+          ext=""
+          if [ "$RUST_TARGET" = "x86_64-pc-windows-msvc" ]; then ext=".exe"; fi
+          curl -sL --fail -o "src-tauri/binaries/ffmpeg-${RUST_TARGET}${ext}" "${base}/ffmpeg-${FFMPEG_ASSET}"
+          curl -sL --fail -o "src-tauri/binaries/ffprobe-${RUST_TARGET}${ext}" "${base}/ffprobe-${FFMPEG_ASSET}"
+          curl -sL --fail -o "src-tauri/binaries/ffmpeg-${FFMPEG_ASSET}.LICENSE" "${base}/${FFMPEG_ASSET}.LICENSE"
+          chmod +x "src-tauri/binaries/ffmpeg-${RUST_TARGET}${ext}" "src-tauri/binaries/ffprobe-${RUST_TARGET}${ext}"
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -47,4 +74,4 @@ jobs:
           releaseName: 'OffloadKit v__VERSION__'
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: --target ${{ matrix.target }}

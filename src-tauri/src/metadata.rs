@@ -80,8 +80,35 @@ impl MediaMetadata {
     }
 }
 
-fn tool_available(name: &str) -> bool {
-    Command::new(name)
+/// The directory a bundled sidecar binary would live in -- mirrors
+/// `tauri_plugin_shell`'s own `relative_command_path` (verified against that
+/// crate's real source rather than assumed, since this project doesn't
+/// otherwise depend on it just for this one path computation): next to
+/// `current_exe()`, adjusted up one level out of `deps/` when running under
+/// `cargo test`.
+fn sidecar_dir() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    if exe_dir.ends_with("deps") {
+        Some(exe_dir.parent().unwrap_or(&exe_dir).to_path_buf())
+    } else {
+        Some(exe_dir)
+    }
+}
+
+/// The path a bundled `<name>` sidecar (see `externalBin` in
+/// `tauri.conf.json`) would be installed at, if the file actually exists
+/// there -- a packaged build ships one, a plain `cargo build`/`cargo test`
+/// run generally doesn't.
+fn sidecar_path(name: &str) -> Option<PathBuf> {
+    let mut path = sidecar_dir()?.join(name);
+    if cfg!(windows) {
+        path.set_extension("exe");
+    }
+    path.exists().then_some(path)
+}
+
+fn tool_responds(program: &Path) -> bool {
+    Command::new(program)
         .arg("-version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -90,14 +117,29 @@ fn tool_available(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn ffprobe_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| tool_available("ffprobe"))
+/// Resolves the command to invoke for `name` ("ffmpeg"/"ffprobe"): prefers
+/// the bundled sidecar next to the running executable (so a packaged
+/// install works with no external dependency), falling back to a bare PATH
+/// lookup so a dev machine with ffmpeg already installed -- but no sidecar
+/// fetched -- keeps working exactly as before.
+fn resolve_tool(name: &str) -> Option<PathBuf> {
+    if let Some(sidecar) = sidecar_path(name) {
+        if tool_responds(&sidecar) {
+            return Some(sidecar);
+        }
+    }
+    let bare = PathBuf::from(name);
+    tool_responds(&bare).then_some(bare)
 }
 
-fn ffmpeg_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| tool_available("ffmpeg"))
+fn ffprobe_path() -> Option<PathBuf> {
+    static RESOLVED: OnceLock<Option<PathBuf>> = OnceLock::new();
+    RESOLVED.get_or_init(|| resolve_tool("ffprobe")).clone()
+}
+
+fn ffmpeg_path() -> Option<PathBuf> {
+    static RESOLVED: OnceLock<Option<PathBuf>> = OnceLock::new();
+    RESOLVED.get_or_init(|| resolve_tool("ffmpeg")).clone()
 }
 
 #[derive(Deserialize)]
@@ -138,10 +180,8 @@ fn parse_frame_rate(raw: &str) -> Option<f64> {
 /// callers treat that as "no metadata available", not an error worth
 /// blocking on (this mirrors the copy engine's own approach to bad files).
 pub fn probe_with_ffprobe(path: &Path) -> Option<MediaMetadata> {
-    if !ffprobe_available() {
-        return None;
-    }
-    let output = Command::new("ffprobe")
+    let ffprobe = ffprobe_path()?;
+    let output = Command::new(ffprobe)
         .args(["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"])
         .arg(path)
         .output()
@@ -232,10 +272,10 @@ pub fn extract_metadata(path: &Path, kind: MediaKind) -> Option<MediaMetadata> {
 /// legitimately fail for those -- the caller treats a `false` return as
 /// "no thumbnail available", not an error.
 fn generate_thumbnail(path: &Path, kind: MediaKind, out_path: &Path) -> bool {
-    if !ffmpeg_available() {
+    let Some(ffmpeg) = ffmpeg_path() else {
         return false;
-    }
-    let mut cmd = Command::new("ffmpeg");
+    };
+    let mut cmd = Command::new(ffmpeg);
     cmd.arg("-y");
     if kind == MediaKind::Video {
         cmd.args(["-ss", "1"]);
