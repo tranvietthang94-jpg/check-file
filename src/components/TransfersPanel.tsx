@@ -231,7 +231,9 @@ export function TransfersPanel({
                 <span className="truncate text-sm">
                   {group.sourceLabel}{" "}
                   <span className="text-neutral-500">→</span>{" "}
-                  {group.destinationLabels.join(", ")}
+                  {group.destinationLabels.join(
+                    group.mode === "cascade" ? " → " : ", ",
+                  )}
                   <span className="ml-2 text-[10px] uppercase tracking-wide text-neutral-500">
                     {MODE_LABEL[group.mode]}
                   </span>

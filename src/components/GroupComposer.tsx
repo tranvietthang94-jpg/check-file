@@ -3,6 +3,8 @@ import { useSettingsStore } from "../state/settingsStore";
 import type { DiskInfo, Endpoint } from "../types/disk";
 import type { TransferGroupMode } from "../types/transferGroup";
 
+const CASCADE_REORDER_MIME = "application/x-offloadkit-cascade-reorder";
+
 interface GroupComposerProps {
   sources: Endpoint[];
   destinations: Endpoint[];
@@ -25,7 +27,21 @@ export function GroupComposer({ sources, destinations, disks, onStart }: GroupCo
   const [destIds, setDestIds] = useState<string[]>([]); // selection order = cascade hop order
   const [mode, setMode] = useState<TransferGroupMode>("parallel");
   const [moveAfterTransfer, setMoveAfterTransfer] = useState(false);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const verificationMode = useSettingsStore((s) => s.verificationMode);
+
+  /** Drag one cascade destination onto another to relocate it in the relay
+   * order -- replaces reordering-by-deselect-and-reselect with OffShoot's
+   * drag-a-destination-card interaction. */
+  function moveDestination(from: number, to: number) {
+    setDestIds((prev) => {
+      if (from === to || from < 0 || from >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
 
   const source = sources.find((s) => s.diskId === sourceId) ?? null;
   const selectedDestinations = destIds
@@ -80,7 +96,7 @@ export function GroupComposer({ sources, destinations, disks, onStart }: GroupCo
 
           <div className="flex flex-col gap-1">
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Destinations{destIds.length > 1 ? " (order = cascade order)" : ""}
+              Destinations
             </span>
             {destinations.map((d) => {
               const order = destIds.indexOf(d.diskId);
@@ -92,15 +108,57 @@ export function GroupComposer({ sources, destinations, disks, onStart }: GroupCo
                     onChange={() => toggleDestination(d.diskId)}
                   />
                   {endpointLabel(d, disks)}
-                  {mode === "cascade" && order !== -1 && (
-                    <span className="text-neutral-500">
-                      {order === 0 ? "(primary)" : `(#${order + 1})`}
-                    </span>
-                  )}
                 </label>
               );
             })}
           </div>
+
+          {mode === "cascade" && selectedDestinations.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Cascade order -- drag to reorder
+              </span>
+              <div className="flex flex-col">
+                {selectedDestinations.map((d, i) => (
+                  <div key={d.diskId} className="flex flex-col items-stretch">
+                    <div
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData(CASCADE_REORDER_MIME, String(i));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        setDragOverIndex(i);
+                      }}
+                      onDragLeave={() => setDragOverIndex((cur) => (cur === i ? null : cur))}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setDragOverIndex(null);
+                        const from = Number(e.dataTransfer.getData(CASCADE_REORDER_MIME));
+                        if (!Number.isNaN(from)) moveDestination(from, i);
+                      }}
+                      className={`flex cursor-grab items-center justify-between rounded border px-2 py-1 text-xs active:cursor-grabbing ${
+                        dragOverIndex === i
+                          ? "border-blue-500 bg-blue-500/10"
+                          : "border-neutral-700 bg-neutral-900"
+                      }`}
+                    >
+                      <span>{endpointLabel(d, disks)}</span>
+                      <span className="text-neutral-500">
+                        {i === 0 ? "primary" : `hop ${i + 1}`}
+                      </span>
+                    </div>
+                    {i < selectedDestinations.length - 1 && (
+                      <span className="py-0.5 text-center text-neutral-600" aria-hidden="true">
+                        ↓
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">Mode</span>
