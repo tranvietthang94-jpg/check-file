@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useDisksStore } from "../state/disksStore";
 import { useTransfersStore } from "../state/transfersStore";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
+import { DISK_DRAG_MIME } from "../lib/dragTypes";
 import { DriveIcon } from "./icons/DriveIcon";
+import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
 import type { DiskInfo } from "../types/disk";
 import type { TransferJob } from "../types/job";
 
@@ -28,8 +31,14 @@ export function DisksPanel() {
 
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; diskId: string } | null>(
+    null,
+  );
 
   const visibleDisks = disks.filter((d) => !hiddenDiskIds.includes(d.id));
+  const contextMenuDisk = contextMenu
+    ? visibleDisks.find((d) => d.id === contextMenu.diskId)
+    : undefined;
 
   async function handleEject(disk: DiskInfo) {
     setEjecting((prev) => ({ ...prev, [disk.id]: true }));
@@ -41,6 +50,39 @@ export function DisksPanel() {
     } finally {
       setEjecting((prev) => ({ ...prev, [disk.id]: false }));
     }
+  }
+
+  function buildMenuItems(disk: DiskInfo): DiskContextMenuItem[] {
+    const isSource = sources.some((s) => s.diskId === disk.id);
+    const isDestination = destinations.some((d) => d.diskId === disk.id);
+    const assigned = isSource || isDestination;
+    const busy = isDiskBusy(disk, Object.values(jobs));
+
+    const items: DiskContextMenuItem[] = [
+      { label: "Set as Source", onSelect: () => addSource(disk.id), disabled: isSource },
+      {
+        label: "Set as Destination",
+        onSelect: () => addDestination(disk.id),
+        disabled: isDestination,
+      },
+    ];
+    if (disk.isRemovable) {
+      items.push({
+        label: ejecting[disk.id] ? "Ejecting…" : "Eject",
+        onSelect: () => handleEject(disk),
+        disabled: busy || ejecting[disk.id],
+      });
+    }
+    items.push({
+      label: "Open in Explorer",
+      onSelect: () => revealItemInDir(disk.mountPoint).catch(console.error),
+    });
+    items.push({
+      label: "Hide",
+      onSelect: () => hideDisk(disk.id),
+      disabled: assigned,
+    });
+    return items;
   }
 
   return (
@@ -65,7 +107,17 @@ export function DisksPanel() {
           return (
             <li
               key={disk.id}
-              className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(DISK_DRAG_MIME, disk.id);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, diskId: disk.id });
+              }}
+              title="Drag onto Sources/Destinations, or right-click for more actions"
+              className="flex cursor-grab flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 active:cursor-grabbing"
             >
               <div className="flex items-center gap-2">
                 <DriveIcon removable={disk.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
@@ -127,6 +179,15 @@ export function DisksPanel() {
           );
         })}
       </ul>
+
+      {contextMenu && contextMenuDisk && (
+        <DiskContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildMenuItems(contextMenuDisk)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </section>
   );
 }

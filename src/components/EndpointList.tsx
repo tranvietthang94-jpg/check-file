@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { DriveIcon } from "./icons/DriveIcon";
+import { DISK_DRAG_MIME } from "../lib/dragTypes";
 import type { DiskInfo, Endpoint } from "../types/disk";
 
 /** Blue for a manually-typed label, a white outline for an Auto Label -- mirrors OffShoot. */
@@ -15,6 +17,11 @@ interface EndpointListProps {
   onLabelChange: (diskId: string, label: string) => void;
   onPathChange: (diskId: string, path: string) => void;
   onBrowse?: (path: string) => void;
+  /** Called with the dragged disk's id when it's dropped here -- typically
+   * wired straight to the same store action the "+ Source/Destination"
+   * buttons already use, so drag-and-drop is just another way to do the
+   * exact same thing. */
+  onDropDisk?: (diskId: string) => void;
 }
 
 export function EndpointList({
@@ -25,14 +32,36 @@ export function EndpointList({
   onLabelChange,
   onPathChange,
   onBrowse,
+  onDropDisk,
 }: EndpointListProps) {
+  const [dragOver, setDragOver] = useState(false);
+
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      className={`flex flex-col gap-2 rounded ${
+        onDropDisk ? `border border-dashed p-2 ${dragOver ? "border-green-500 bg-neutral-900/60" : "border-neutral-700"}` : ""
+      }`}
+      onDragOver={(e) => {
+        if (!onDropDisk) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        if (!onDropDisk) return;
+        e.preventDefault();
+        setDragOver(false);
+        const diskId = e.dataTransfer.getData(DISK_DRAG_MIME);
+        if (diskId) onDropDisk(diskId);
+      }}
+    >
       <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
         {title}
       </h2>
       {endpoints.length === 0 && (
-        <p className="text-sm text-neutral-500">None assigned yet.</p>
+        <p className="text-sm text-neutral-500">
+          {onDropDisk ? "None assigned yet -- drag a disk here, or use + Source/Destination." : "None assigned yet."}
+        </p>
       )}
       <ul className="flex flex-col gap-2">
         {endpoints.map((endpoint) => {

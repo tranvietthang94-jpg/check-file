@@ -4,11 +4,21 @@ import { useDisksStore } from "../../state/disksStore";
 import { usePresetsStore } from "../../state/presetsStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { effectiveJobDate, previewDestinationPath, renderTemplate } from "../../lib/tokenEngine";
+import { TemplateBuilder, type TemplateToken } from "../organize/TemplateBuilder";
 import type { SelectiveCopyMode } from "../../types/organize";
 
-const TOKEN_REFERENCE =
-  "{Source Name} {Counter} {YYYY}{YY}{MM}{DD}{hh}{mm}{ss} · " +
-  "{Filename} {File Counter} {File Extension} {File YYYY}.. · {Content YYYY}..";
+const DATE_SUB_TOKENS = ["YYYY", "YY", "MM", "DD", "hh", "mm", "ss"];
+
+const BUILTIN_TOKENS: TemplateToken[] = [
+  { name: "Source Name", group: "General" },
+  { name: "Counter", group: "General" },
+  { name: "Filename", group: "General" },
+  { name: "File Counter", group: "General" },
+  { name: "File Extension", group: "General" },
+  ...DATE_SUB_TOKENS.map((t) => ({ name: t, group: "Shoot Date" })),
+  ...DATE_SUB_TOKENS.map((t) => ({ name: `File ${t}`, group: "File Date" })),
+  ...DATE_SUB_TOKENS.map((t) => ({ name: `Content ${t}`, group: "Content Date" })),
+];
 
 const NOW = new Date();
 
@@ -267,6 +277,13 @@ export function OrganizePreferences() {
     },
   );
 
+  const allTokens: TemplateToken[] = [
+    ...BUILTIN_TOKENS,
+    ...elements
+      .filter((e) => e.name.trim() !== "")
+      .map((e) => ({ name: e.name.trim(), group: "Elements" })),
+  ];
+
   return (
     <div className="flex flex-col gap-6">
       <PresetsSection />
@@ -276,32 +293,30 @@ export function OrganizePreferences() {
           Organize
         </h3>
 
-        <label className="flex flex-col gap-1 text-xs">
+        <div className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
             Rename template
           </span>
-          <input
+          <TemplateBuilder
             value={renameTemplate ?? ""}
-            onChange={(e) => setRenameTemplate(e.currentTarget.value)}
+            onChange={setRenameTemplate}
+            tokens={allTokens}
             placeholder="Keep original filename…"
-            autoComplete="off"
-            className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
           />
-        </label>
+        </div>
 
-        <label className="flex flex-col gap-1 text-xs">
+        <div className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
             Folder template
           </span>
-          <input
+          <TemplateBuilder
             value={folderTemplate ?? ""}
-            onChange={(e) => setFolderTemplate(e.currentTarget.value)}
-            placeholder="Keep original folder structure…"
+            onChange={setFolderTemplate}
+            tokens={allTokens}
             disabled={flatten}
-            autoComplete="off"
-            className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs disabled:opacity-40"
+            placeholder="Keep original folder structure…"
           />
-        </label>
+        </div>
 
         <p
           className="truncate rounded border border-neutral-800 bg-neutral-900 px-2 py-1 font-mono text-[10px] text-neutral-400"
@@ -309,7 +324,6 @@ export function OrganizePreferences() {
         >
           Preview: {preview}
         </p>
-        <p className="text-[10px] leading-relaxed text-neutral-600">{TOKEN_REFERENCE}</p>
 
         <label className="flex items-center gap-2 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">

@@ -53,6 +53,8 @@ function App() {
   const sources = useDisksStore((s) => s.sources);
   const destinations = useDisksStore((s) => s.destinations);
   const setDisks = useDisksStore((s) => s.setDisks);
+  const addSource = useDisksStore((s) => s.addSource);
+  const addDestination = useDisksStore((s) => s.addDestination);
   const removeSource = useDisksStore((s) => s.removeSource);
   const removeDestination = useDisksStore((s) => s.removeDestination);
   const setSourceLabel = useDisksStore((s) => s.setSourceLabel);
@@ -371,6 +373,7 @@ function App() {
             onLabelChange={setSourceLabel}
             onPathChange={setSourcePath}
             onBrowse={handleBrowse}
+            onDropDisk={addSource}
           />
           <EndpointList
             title="Destinations"
@@ -379,6 +382,7 @@ function App() {
             onRemove={removeDestination}
             onLabelChange={setDestinationLabel}
             onPathChange={setDestinationPath}
+            onDropDisk={addDestination}
           />
           <GroupComposer
             sources={sources}
