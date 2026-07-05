@@ -33,6 +33,8 @@ import { PreferencesModal } from "./components/PreferencesModal";
 import { ReportsPanel } from "./components/ReportsPanel";
 import { MhlVerifyPanel } from "./components/MhlVerifyPanel";
 import { TransferLogPanel } from "./components/TransferLogPanel";
+import { Button } from "./components/ui/Button";
+import { ArrowLeftRight, HardDrive, Settings } from "./components/icons";
 import { pathLabel, formatBytes } from "./lib/format";
 import { notifyTransfer } from "./lib/notify";
 import type { DiskInfo, Endpoint } from "./types/disk";
@@ -362,32 +364,35 @@ function App() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-xl font-semibold">OffloadKit</h1>
         <div className="flex items-center gap-2">
-          <div className="flex rounded border border-neutral-800">
+          <div className="flex items-center gap-1 rounded border border-neutral-800 p-1">
             {(
               [
-                { id: "disks", label: "Ổ đĩa" },
-                { id: "transfers", label: "Truyền tải" },
+                { id: "disks", label: "Ổ đĩa", icon: <HardDrive className="h-3.5 w-3.5" /> },
+                {
+                  id: "transfers",
+                  label: "Truyền tải",
+                  icon: <ArrowLeftRight className="h-3.5 w-3.5" />,
+                },
               ] as const
             ).map((v) => (
-              <button
+              <Button
                 key={v.id}
-                type="button"
+                variant="ghost"
+                active={view === v.id}
+                icon={v.icon}
                 onClick={() => setView(v.id)}
-                className={`px-3 py-1.5 text-xs ${
-                  view === v.id ? "bg-neutral-800 text-neutral-100" : "text-neutral-500 hover:text-neutral-300"
-                }`}
               >
                 {v.label}
-              </button>
+              </Button>
             ))}
           </div>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            icon={<Settings className="h-3.5 w-3.5" />}
             onClick={() => setPreferencesOpen(true)}
-            className="rounded border border-neutral-700 px-3 py-1.5 text-xs"
           >
             Cài đặt
-          </button>
+          </Button>
         </div>
       </div>
 
