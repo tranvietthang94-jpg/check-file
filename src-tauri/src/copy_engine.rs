@@ -1040,6 +1040,8 @@ pub fn run_copy_job<R: Runtime>(
     move_after_transfer: bool,
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    save_log_to_destination: bool,
+    create_per_file_mhl: bool,
 ) -> CopyOutcome {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
@@ -1098,6 +1100,10 @@ pub fn run_copy_job<R: Runtime>(
         .flatten()
         .map(|p| p.display().to_string());
 
+    if create_per_file_mhl {
+        mhl::write_per_file_mhls(&destination, &outcome.mhl_entries, started_at, finished_at);
+    }
+
     let log_entry = TransferLogEntry {
         job_id: job_id.clone(),
         source_name,
@@ -1120,6 +1126,12 @@ pub fn run_copy_job<R: Runtime>(
         cancelled: outcome.cancelled,
     };
     let _ = transfer_log::save_log(&app_handle, &log_entry);
+    // OffShoot's "Include Transfer Logs ... on Destination" -- the JSON log
+    // is always saved locally (above); this additionally drops a copy at
+    // the destination root, mirroring where the MHL already always lands.
+    if save_log_to_destination {
+        let _ = transfer_log::save_log_to_dir(&destination, &log_entry);
+    }
 
     app_handle.state::<JobRegistry>().remove(&job_id);
     outcome

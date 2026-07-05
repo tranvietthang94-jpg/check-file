@@ -45,6 +45,8 @@ export function startTransferGroup(
   moveAfterTransfer: boolean,
   moveSameVolume: boolean,
   legacyChecksumAlgorithm: ChecksumAlgorithm | null,
+  saveLogToDestination: boolean,
+  createPerFileMhl: boolean,
 ): Promise<string> {
   return invoke<string>("start_transfer_group", {
     source,
@@ -57,6 +59,8 @@ export function startTransferGroup(
     moveAfterTransfer,
     moveSameVolume,
     legacyChecksumAlgorithm,
+    saveLogToDestination,
+    createPerFileMhl,
   });
 }
 

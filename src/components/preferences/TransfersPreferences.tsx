@@ -45,12 +45,16 @@ export function TransfersPreferences() {
   const moveSameVolume = useSettingsStore((s) => s.moveSameVolume);
   const legacyChecksumEnabled = useSettingsStore((s) => s.legacyChecksumEnabled);
   const legacyChecksumAlgorithm = useSettingsStore((s) => s.legacyChecksumAlgorithm);
+  const saveLogToDestination = useSettingsStore((s) => s.saveLogToDestination);
+  const createPerFileMhl = useSettingsStore((s) => s.createPerFileMhl);
   const setVerificationMode = useSettingsStore((s) => s.setVerificationMode);
   const setChecksumAlgorithm = useSettingsStore((s) => s.setChecksumAlgorithm);
   const setQueueMode = useSettingsStore((s) => s.setQueueMode);
   const setMoveSameVolume = useSettingsStore((s) => s.setMoveSameVolume);
   const setLegacyChecksumEnabled = useSettingsStore((s) => s.setLegacyChecksumEnabled);
   const setLegacyChecksumAlgorithm = useSettingsStore((s) => s.setLegacyChecksumAlgorithm);
+  const setSaveLogToDestination = useSettingsStore((s) => s.setSaveLogToDestination);
+  const setCreatePerFileMhl = useSettingsStore((s) => s.setCreatePerFileMhl);
 
   return (
     <div className="flex flex-col gap-6">
@@ -166,6 +170,40 @@ export function TransfersPreferences() {
             </label>
           ))}
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
+          Paper Trail
+        </h3>
+        <label className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={saveLogToDestination}
+            onChange={(e) => setSaveLogToDestination(e.currentTarget.checked)}
+            className="mt-0.5"
+          />
+          <span className="flex flex-col">
+            <span className="font-medium">Include Transfer Logs on Destination</span>
+            <span className="text-neutral-500">
+              Transfer Logs are always saved locally as well.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={createPerFileMhl}
+            onChange={(e) => setCreatePerFileMhl(e.currentTarget.checked)}
+            className="mt-0.5"
+          />
+          <span className="flex flex-col">
+            <span className="font-medium">Also create an MHL for each file</span>
+            <span className="text-neutral-500">
+              One sidecar MHL next to each file, alongside the combined one.
+            </span>
+          </span>
+        </label>
       </section>
     </div>
   );

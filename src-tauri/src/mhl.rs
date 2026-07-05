@@ -130,6 +130,32 @@ pub fn render_mhl(entries: &[MhlFileEntry], started_at: SystemTime, finished_at:
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{body}\n")
 }
 
+/// OffShoot's "Also create an MHL for each file" -- one small single-entry
+/// MHL per copied file, written next to that file (the common per-clip
+/// sidecar convention), in addition to the one combined MHL [`write_mhl`]
+/// already writes at the destination root. Best-effort per file: one
+/// unwritable entry (e.g. an unreadable parent dir) doesn't stop the rest.
+pub fn write_per_file_mhls(
+    destination: &Path,
+    entries: &[MhlFileEntry],
+    started_at: SystemTime,
+    finished_at: SystemTime,
+) -> Vec<PathBuf> {
+    let mut written = Vec::new();
+    for entry in entries {
+        let file_dest = destination.join(&entry.relative_path);
+        let (Some(parent), Some(file_name)) = (file_dest.parent(), file_dest.file_name()) else {
+            continue;
+        };
+        let mhl_path = parent.join(format!("{}.mhl", file_name.to_string_lossy()));
+        let xml = render_mhl(std::slice::from_ref(entry), started_at, finished_at);
+        if fs::write(&mhl_path, xml).is_ok() {
+            written.push(mhl_path);
+        }
+    }
+    written
+}
+
 /// Writes the MHL for one completed transfer to the destination root,
 /// returning the path written. A no-op when there's nothing to record, e.g.
 /// a transfer that copied zero files (skips-only re-run of an already
@@ -509,6 +535,24 @@ mod tests {
         assert_eq!(path.parent().unwrap(), dir.path());
         assert!(path.extension().and_then(|e| e.to_str()) == Some("mhl"));
         let contents = fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("CLIP/C0001.MP4"));
+    }
+
+    #[test]
+    fn write_per_file_mhls_writes_one_sidecar_mhl_next_to_each_file() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("CLIP")).unwrap();
+
+        let written = write_per_file_mhls(
+            dir.path(),
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        );
+
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0], dir.path().join("CLIP").join("C0001.MP4.mhl"));
+        let contents = fs::read_to_string(&written[0]).unwrap();
         assert!(contents.contains("CLIP/C0001.MP4"));
     }
 

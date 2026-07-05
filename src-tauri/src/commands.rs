@@ -55,6 +55,8 @@ pub fn start_transfer_group(
     move_after_transfer: bool,
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    save_log_to_destination: bool,
+    create_per_file_mhl: bool,
 ) -> String {
     cascade::start_transfer_group(
         app_handle,
@@ -68,6 +70,8 @@ pub fn start_transfer_group(
         move_after_transfer,
         move_same_volume,
         legacy_checksum_algorithm,
+        save_log_to_destination,
+        create_per_file_mhl,
     )
 }
 

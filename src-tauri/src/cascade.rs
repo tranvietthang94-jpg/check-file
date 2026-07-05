@@ -61,6 +61,8 @@ fn spawn_job<R: Runtime>(
     move_after_transfer: bool,
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    save_log_to_destination: bool,
+    create_per_file_mhl: bool,
 ) -> String {
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = app_handle.state::<JobRegistry>().register(job_id.clone());
@@ -108,6 +110,8 @@ fn spawn_job<R: Runtime>(
             move_after_transfer,
             move_same_volume,
             legacy_checksum_algorithm,
+            save_log_to_destination,
+            create_per_file_mhl,
         );
     });
 
@@ -130,6 +134,8 @@ pub fn start_transfer_group<R: Runtime>(
     move_after_transfer: bool,
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    save_log_to_destination: bool,
+    create_per_file_mhl: bool,
 ) -> String {
     let group_id = Uuid::new_v4().to_string();
 
@@ -158,6 +164,8 @@ pub fn start_transfer_group<R: Runtime>(
                     effective_move,
                     effective_same_volume_move,
                     legacy_checksum_algorithm,
+                    save_log_to_destination,
+                    create_per_file_mhl,
                 );
             }
         }
@@ -225,6 +233,8 @@ pub fn start_transfer_group<R: Runtime>(
                     move_after_transfer,
                     move_same_volume,
                     legacy_checksum_algorithm,
+                    save_log_to_destination,
+                    create_per_file_mhl,
                 );
 
                 if !should_cascade_continue(&outcome) {
@@ -235,7 +245,8 @@ pub fn start_transfer_group<R: Runtime>(
                     // Hop 2's "source" is the primary destination we just
                     // wrote and verified -- it must never be deleted, so this
                     // is never Move- or same-volume-move-eligible regardless
-                    // of the caller's settings.
+                    // of the caller's settings. The paper-trail settings
+                    // aren't destructive, so hop 2 still honors them.
                     spawn_job(
                         &app_handle_thread,
                         &group_id_thread,
@@ -249,6 +260,8 @@ pub fn start_transfer_group<R: Runtime>(
                         false,
                         false,
                         legacy_checksum_algorithm,
+                        save_log_to_destination,
+                        create_per_file_mhl,
                     );
                 }
             });

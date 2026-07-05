@@ -91,6 +91,8 @@ function App() {
   const legacyChecksumEnabled = useSettingsStore((s) => s.legacyChecksumEnabled);
   const legacyChecksumAlgorithm = useSettingsStore((s) => s.legacyChecksumAlgorithm);
   const effectiveLegacyChecksumAlgorithm = legacyChecksumEnabled ? legacyChecksumAlgorithm : null;
+  const saveLogToDestination = useSettingsStore((s) => s.saveLogToDestination);
+  const createPerFileMhl = useSettingsStore((s) => s.createPerFileMhl);
 
   const refreshTransferLogs = useTransferLogStore((s) => s.refresh);
 
@@ -262,6 +264,8 @@ function App() {
       moveAfterTransfer,
       moveSameVolume,
       effectiveLegacyChecksumAlgorithm,
+      saveLogToDestination,
+      createPerFileMhl,
     );
     setGroupMeta(
       groupId,
@@ -326,6 +330,8 @@ function App() {
       false,
       moveSameVolume,
       effectiveLegacyChecksumAlgorithm,
+      saveLogToDestination,
+      createPerFileMhl,
     );
     setGroupMeta(groupId, "parallel", job.sourceLabel, [job.destinationLabel]);
   }
