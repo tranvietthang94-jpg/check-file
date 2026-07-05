@@ -34,7 +34,10 @@ import { ReportsPanel } from "./components/ReportsPanel";
 import { MhlVerifyPanel } from "./components/MhlVerifyPanel";
 import { TransferLogPanel } from "./components/TransferLogPanel";
 import { Button } from "./components/ui/Button";
-import { ArrowLeftRight, HardDrive, Settings } from "./components/icons";
+import { IconButton } from "./components/ui/IconButton";
+import { Modal } from "./components/ui/Modal";
+import { DiskContextMenu, type DiskContextMenuItem } from "./components/DiskContextMenu";
+import { ArrowLeftRight, HardDrive, History, Menu, FileText, Settings } from "./components/icons";
 import { pathLabel, formatBytes } from "./lib/format";
 import { notifyTransfer } from "./lib/notify";
 import type { DiskInfo, Endpoint } from "./types/disk";
@@ -51,6 +54,12 @@ function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
 function App() {
   const [view, setView] = useState<"disks" | "transfers">("disks");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [transferLogOpen, setTransferLogOpen] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  // Matches OffShoot's own hamburger menu -- Transfer Logs/Reports/Settings
+  // open as their own windows from here rather than living permanently
+  // stacked in the Transfers view.
+  const [appMenu, setAppMenu] = useState<{ x: number; y: number } | null>(null);
 
   const disks = useDisksStore((s) => s.disks);
   const sources = useDisksStore((s) => s.sources);
@@ -392,15 +401,49 @@ function App() {
               </Button>
             ))}
           </div>
-          <Button
-            variant="secondary"
-            icon={<Settings className="h-3.5 w-3.5" />}
-            onClick={() => setPreferencesOpen(true)}
-          >
-            Cài đặt
-          </Button>
+          <IconButton
+            aria-label="Menu"
+            title="Menu"
+            icon={<Menu className="h-4 w-4" />}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              // Anchored to the button's right edge (it sits at the far
+              // right of the header) -- DiskContextMenu only positions from
+              // its top-left corner, so the menu's ~200px width has to be
+              // subtracted back from the button's right edge here, or it
+              // would render mostly off-screen.
+              setAppMenu({ x: Math.max(8, rect.right - 200), y: rect.bottom + 4 });
+            }}
+          />
         </div>
       </div>
+
+      {appMenu && (
+        <DiskContextMenu
+          x={appMenu.x}
+          y={appMenu.y}
+          onClose={() => setAppMenu(null)}
+          items={
+            [
+              {
+                label: "Nhật ký truyền tải",
+                icon: <History className="h-3.5 w-3.5" />,
+                onSelect: () => setTransferLogOpen(true),
+              },
+              {
+                label: "Báo cáo",
+                icon: <FileText className="h-3.5 w-3.5" />,
+                onSelect: () => setReportsOpen(true),
+              },
+              {
+                label: "Cài đặt",
+                icon: <Settings className="h-3.5 w-3.5" />,
+                onSelect: () => setPreferencesOpen(true),
+              },
+            ] satisfies DiskContextMenuItem[]
+          }
+        />
+      )}
 
       {view === "disks" ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
@@ -451,8 +494,6 @@ function App() {
               onResumeJob={handleResumeJob}
               onResolveBrokenMedia={handleResolveBrokenMedia}
             />
-            <TransferLogPanel onViewClips={handleBrowse} />
-            <ReportsPanel />
             <MhlVerifyPanel />
           </div>
           <EndpointList
@@ -478,6 +519,14 @@ function App() {
       />
 
       <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
+
+      <Modal open={transferLogOpen} onClose={() => setTransferLogOpen(false)} title="Nhật ký truyền tải">
+        <TransferLogPanel onViewClips={handleBrowse} />
+      </Modal>
+
+      <Modal open={reportsOpen} onClose={() => setReportsOpen(false)} title="Báo cáo">
+        <ReportsPanel />
+      </Modal>
 
       {activeScan && (
         <MediaBrowser

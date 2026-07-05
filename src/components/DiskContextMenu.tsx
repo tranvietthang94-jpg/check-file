@@ -77,10 +77,19 @@ export function DiskContextMenu({ x, y, items, onClose }: DiskContextMenuProps) 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
-    window.addEventListener("click", handleWindowClick);
-    window.addEventListener("contextmenu", handleWindowClick);
     window.addEventListener("keydown", handleKeyDown);
+    // The click/right-click that *opens* this menu is often still bubbling
+    // up to `window` at the moment this effect runs (React 18 flushes a
+    // discrete event's resulting effects synchronously, before the browser
+    // finishes dispatching that same event past `window`) -- attaching
+    // these two listeners on the very next tick instead of immediately
+    // means the opening click can't also be the closing click.
+    const timer = setTimeout(() => {
+      window.addEventListener("click", handleWindowClick);
+      window.addEventListener("contextmenu", handleWindowClick);
+    }, 0);
     return () => {
+      clearTimeout(timer);
       window.removeEventListener("click", handleWindowClick);
       window.removeEventListener("contextmenu", handleWindowClick);
       window.removeEventListener("keydown", handleKeyDown);

@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { useTransferLogStore } from "../state/transferLogStore";
 import { formatBytes } from "../lib/format";
 import { Panel } from "./ui/Panel";
-import { SectionHeading } from "./ui/SectionHeading";
 import { EmptyState } from "./ui/EmptyState";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
@@ -82,20 +81,16 @@ export function TransferLogPanel({ onViewClips }: TransferLogPanelProps) {
   }, [refresh]);
 
   return (
-    <section className="col-span-full flex flex-col gap-2">
-      <SectionHeading
-        action={
-          <Button
-            variant="secondary"
-            icon={<RefreshCw className="h-3.5 w-3.5" />}
-            onClick={() => refresh()}
-          >
-            Làm mới
-          </Button>
-        }
-      >
-        Nhật ký truyền tải
-      </SectionHeading>
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-end">
+        <Button
+          variant="secondary"
+          icon={<RefreshCw className="h-3.5 w-3.5" />}
+          onClick={() => refresh()}
+        >
+          Làm mới
+        </Button>
+      </div>
 
       {loading && <p className="text-xs text-neutral-500">Đang tải…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -110,6 +105,6 @@ export function TransferLogPanel({ onViewClips }: TransferLogPanelProps) {
           <LogRow key={entry.jobId} entry={entry} onViewClips={onViewClips} />
         ))}
       </ul>
-    </section>
+    </div>
   );
 }

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useTransferLogStore } from "../state/transferLogStore";
 import { generateReport } from "../lib/tauri";
-import { SectionHeading } from "./ui/SectionHeading";
 import { Checkbox } from "./ui/Checkbox";
 import { Button } from "./ui/Button";
 import { IconButton } from "./ui/IconButton";
@@ -98,9 +97,7 @@ export function ReportsPanel() {
   }
 
   return (
-    <section className="col-span-full flex flex-col gap-2">
-      <SectionHeading>Báo cáo</SectionHeading>
-
+    <div className="flex flex-col gap-2">
       {logs.length === 0 ? (
         <EmptyState icon={<FileText className="h-5 w-5" />}>
           Chưa có lượt truyền nào hoàn tất -- Báo cáo tổng hợp một hoặc nhiều mục trong Nhật ký
@@ -220,6 +217,6 @@ export function ReportsPanel() {
           {error && <p className="text-[10px] text-red-400">{error}</p>}
         </>
       )}
-    </section>
+    </div>
   );
 }
