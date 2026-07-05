@@ -98,6 +98,11 @@ pub fn eject_disk(mount_point: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn rename_disk(mount_point: String, label: String) -> Result<(), String> {
+    crate::volume_rename::rename_volume(&mount_point, &label).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn set_prevent_sleep(registry: State<JobRegistry>, enabled: bool) {
     registry.set_sleep_prevention_enabled(enabled);
 }

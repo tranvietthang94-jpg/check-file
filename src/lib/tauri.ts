@@ -141,6 +141,10 @@ export function ejectDisk(mountPoint: string): Promise<void> {
   return invoke<void>("eject_disk", { mountPoint });
 }
 
+export function renameDisk(mountPoint: string, label: string): Promise<void> {
+  return invoke<void>("rename_disk", { mountPoint, label });
+}
+
 export function setPreventSleepEnabled(enabled: boolean): Promise<void> {
   return invoke<void>("set_prevent_sleep", { enabled });
 }

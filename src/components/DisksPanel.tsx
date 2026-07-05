@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { useDisksStore } from "../state/disksStore";
 import { useTransfersStore } from "../state/transfersStore";
 import { useMhlVerifyStore } from "../state/mhlVerifyStore";
-import { ejectDisk } from "../lib/tauri";
+import { ejectDisk, renameDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
 import { DISK_DRAG_MIME } from "../lib/dragTypes";
 import { DriveIcon } from "./icons/DriveIcon";
@@ -33,6 +34,9 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const destinations = useDisksStore((s) => s.destinations);
   const addSource = useDisksStore((s) => s.addSource);
   const addDestination = useDisksStore((s) => s.addDestination);
+  const setSourceLabel = useDisksStore((s) => s.setSourceLabel);
+  const setSourcePath = useDisksStore((s) => s.setSourcePath);
+  const setDestinationPath = useDisksStore((s) => s.setDestinationPath);
   const hiddenDiskIds = useDisksStore((s) => s.hiddenDiskIds);
   const hideDisk = useDisksStore((s) => s.hideDisk);
   const jobs = useTransfersStore((s) => s.jobs);
@@ -43,6 +47,52 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; diskId: string } | null>(
     null,
   );
+  const [editingLabelDiskId, setEditingLabelDiskId] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [renamingDiskId, setRenamingDiskId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<Record<string, string>>({});
+
+  // Renames the actual OS volume (Win32 SetVolumeLabelW / macOS `diskutil
+  // rename`) -- distinct from the app-only "Label" above, which never
+  // touches the real disk. The disk-watcher poll picks up the new name on
+  // its own; no optimistic local update needed.
+  function startRenamingVolume(disk: DiskInfo) {
+    setRenamingDiskId(disk.id);
+    setRenameDraft(disk.name);
+    setRenameError((prev) => ({ ...prev, [disk.id]: "" }));
+  }
+
+  async function commitRename(disk: DiskInfo) {
+    const value = renameDraft.trim();
+    setRenamingDiskId(null);
+    if (!value || value === disk.name) return;
+    try {
+      await renameDisk(disk.mountPoint, value);
+    } catch (err) {
+      setRenameError((prev) => ({ ...prev, [disk.id]: String(err) }));
+    }
+  }
+
+  // Matches OffShoot: clicking a disk's name (before it's even assigned)
+  // lets you type a label and hitting Return both saves it and sets that
+  // disk as a Source in one step -- labels only live on Source/Destination
+  // endpoints, not on the raw disk, so there's nothing to save until then.
+  function startEditingLabel(disk: DiskInfo) {
+    const existingSource = sources.find((s) => s.diskId === disk.id);
+    setEditingLabelDiskId(disk.id);
+    setLabelDraft(existingSource?.label ?? "");
+  }
+
+  function commitLabelEdit(diskId: string) {
+    const value = labelDraft.trim();
+    setEditingLabelDiskId(null);
+    if (!value) return;
+    if (!sources.some((s) => s.diskId === diskId)) {
+      addSource(diskId);
+    }
+    setSourceLabel(diskId, value);
+  }
 
   const visibleDisks = disks.filter((d) => !hiddenDiskIds.includes(d.id));
   const contextMenuDisk = contextMenu
@@ -61,18 +111,62 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     }
   }
 
+  async function chooseSourceFolder(disk: DiskInfo) {
+    const folder = await openFolderDialog({ directory: true, defaultPath: disk.mountPoint });
+    if (!folder || Array.isArray(folder)) return;
+    if (!sources.some((s) => s.diskId === disk.id)) addSource(disk.id);
+    setSourcePath(disk.id, folder);
+  }
+
+  async function chooseDestinationFolder(disk: DiskInfo) {
+    const folder = await openFolderDialog({ directory: true, defaultPath: disk.mountPoint });
+    if (!folder || Array.isArray(folder)) return;
+    if (!destinations.some((d) => d.diskId === disk.id)) addDestination(disk.id);
+    setDestinationPath(disk.id, folder);
+  }
+
+  async function verifyOtherFolder() {
+    const folder = await openFolderDialog({ directory: true });
+    if (!folder || Array.isArray(folder)) return;
+    runVerify(folder, "folder");
+    onVerifyRequested?.();
+  }
+
   function buildMenuItems(disk: DiskInfo): DiskContextMenuItem[] {
     const isSource = sources.some((s) => s.diskId === disk.id);
     const isDestination = destinations.some((d) => d.diskId === disk.id);
     const assigned = isSource || isDestination;
     const busy = isDiskBusy(disk, Object.values(jobs));
+    const diskLabel = sources.find((s) => s.diskId === disk.id)?.label || disk.name;
 
     const items: DiskContextMenuItem[] = [
+      { label: "Add Label…", onSelect: () => startEditingLabel(disk) },
+      {
+        label: "Source Folder",
+        children: [{ label: "Choose Folder…", onSelect: () => chooseSourceFolder(disk) }],
+      },
+      {
+        label: "Destination Folder",
+        children: [{ label: "Choose Folder…", onSelect: () => chooseDestinationFolder(disk) }],
+      },
       { label: "Set as Source", onSelect: () => addSource(disk.id), disabled: isSource },
       {
         label: "Set as Destination",
         onSelect: () => addDestination(disk.id),
         disabled: isDestination,
+      },
+      {
+        label: "Verification",
+        children: [
+          {
+            label: `Verify ${diskLabel}…`,
+            onSelect: () => {
+              runVerify(disk.mountPoint, "folder");
+              onVerifyRequested?.();
+            },
+          },
+          { label: "Verify Folder…", onSelect: () => verifyOtherFolder() },
+        ],
       },
     ];
     if (disk.isRemovable) {
@@ -83,20 +177,17 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
       });
     }
     items.push({
-      label: "Open in Explorer",
-      onSelect: () => revealItemInDir(disk.mountPoint).catch(console.error),
-    });
-    items.push({
-      label: "Verify",
-      onSelect: () => {
-        runVerify(disk.mountPoint, "folder");
-        onVerifyRequested?.();
-      },
+      label: `Rename ${disk.name}`,
+      onSelect: () => startRenamingVolume(disk),
     });
     items.push({
       label: "Hide",
       onSelect: () => hideDisk(disk.id),
       disabled: assigned,
+    });
+    items.push({
+      label: "Open in Explorer",
+      onSelect: () => revealItemInDir(disk.mountPoint).catch(console.error),
     });
     return items;
   }
@@ -138,12 +229,60 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
               <div className="flex items-center gap-2">
                 <DriveIcon removable={disk.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
                 <div className="flex flex-col">
-                  <span className="font-medium">{disk.name}</span>
+                  {editingLabelDiskId === disk.id ? (
+                    <input
+                      autoFocus
+                      value={labelDraft}
+                      onChange={(e) => setLabelDraft(e.currentTarget.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => e.stopPropagation()}
+                      onBlur={() => commitLabelEdit(disk.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitLabelEdit(disk.id);
+                        if (e.key === "Escape") setEditingLabelDiskId(null);
+                      }}
+                      placeholder="Label…"
+                      autoComplete="off"
+                      className="w-32 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-sm font-medium"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      title="Click to add/edit a label -- sets this disk as a Source"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditingLabel(disk);
+                      }}
+                      className="w-fit text-left font-medium hover:underline"
+                    >
+                      {sources.find((s) => s.diskId === disk.id)?.label || disk.name}
+                    </button>
+                  )}
                   <span className="text-xs text-neutral-500">
                     {disk.mountPoint} · {formatBytes(disk.availableBytes)} free of{" "}
                     {formatBytes(disk.totalBytes)}
                     {disk.isRemovable ? " · removable" : ""}
                   </span>
+                  {renamingDiskId === disk.id && (
+                    <input
+                      autoFocus
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.currentTarget.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => e.stopPropagation()}
+                      onBlur={() => commitRename(disk)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename(disk);
+                        if (e.key === "Escape") setRenamingDiskId(null);
+                      }}
+                      title="Rename the actual disk volume (not the app-only Label)"
+                      autoComplete="off"
+                      className="mt-1 w-32 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-xs"
+                    />
+                  )}
+                  {renameError[disk.id] && (
+                    <p className="text-[10px] text-red-400">{renameError[disk.id]}</p>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">
