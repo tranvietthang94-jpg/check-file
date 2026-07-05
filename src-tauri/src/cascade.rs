@@ -347,6 +347,7 @@ mod tests {
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
             broken_media_files: Vec::new(),
+            missing_files: Vec::new(),
         }
     }
 

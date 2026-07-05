@@ -42,6 +42,11 @@ pub struct TransferLogEntry {
     /// existed still load.
     #[serde(default)]
     pub broken_media_files: Vec<String>,
+    /// OffShoot's "Missing Files Detection": destination-relative paths a
+    /// final post-transfer sweep couldn't find on disk. `#[serde(default)]`
+    /// so logs saved before this existed still load.
+    #[serde(default)]
+    pub missing_files: Vec<String>,
     pub mhl_path: Option<String>,
     /// True when this entry records a Stopped (cancelled) transfer rather
     /// than one that ran to completion -- Resume starts a fresh job over the
@@ -125,6 +130,7 @@ mod tests {
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
             broken_media_files: Vec::new(),
+            missing_files: Vec::new(),
             mhl_path: Some("D:\\Offload\\20260703_200005.mhl".to_string()),
             cancelled: false,
         }

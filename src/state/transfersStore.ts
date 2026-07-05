@@ -70,6 +70,7 @@ export const useTransfersStore = create<TransfersState>((set) => ({
         deletedSourceFiles: payload.deletedSourceFiles,
         moveDeleteFailed: payload.moveDeleteFailed,
         brokenMediaFiles: payload.brokenMediaFiles,
+        missingFiles: payload.missingFiles,
         currentFile: "",
       }),
     })),

@@ -24,6 +24,7 @@ export interface TransferLogEntry {
   renamedFiles: RenamedFile[];
   deletedSourceFiles: string[];
   moveDeleteFailed: FailedFile[];
+  missingFiles: string[];
   mhlPath: string | null;
   cancelled: boolean;
 }

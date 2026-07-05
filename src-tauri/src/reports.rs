@@ -220,6 +220,12 @@ fn render_issue_summary(e: &TransferLogEntry) -> String {
             e.move_delete_failed.len()
         ));
     }
+    if !e.missing_files.is_empty() {
+        parts.push(format!(
+            r#"<span class="badge badge-failed">{} missing</span>"#,
+            e.missing_files.len()
+        ));
+    }
     if parts.is_empty() {
         r#"<span class="muted">None</span>"#.to_string()
     } else {
@@ -237,6 +243,7 @@ fn render_files_section(entries: &[TransferLogEntry]) -> String {
                 || !e.skipped_files.is_empty()
                 || !e.renamed_files.is_empty()
                 || !e.move_delete_failed.is_empty()
+                || !e.missing_files.is_empty()
         })
         .map(|e| {
             let failed: String = e
@@ -277,8 +284,18 @@ fn render_files_section(entries: &[TransferLogEntry]) -> String {
                     )
                 })
                 .collect();
+            let missing: String = e
+                .missing_files
+                .iter()
+                .map(|path| {
+                    format!(
+                        "<li><span class=\"badge badge-failed\">Missing</span> {}</li>",
+                        escape_html(path)
+                    )
+                })
+                .collect();
             format!(
-                "<h3>{}</h3><ul class=\"file-list\">{failed}{skipped}{renamed}{move_delete_failed}</ul>",
+                "<h3>{}</h3><ul class=\"file-list\">{failed}{skipped}{renamed}{move_delete_failed}{missing}</ul>",
                 escape_html(&e.source_name)
             )
         })
@@ -492,6 +509,7 @@ mod tests {
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
             broken_media_files: Vec::new(),
+            missing_files: Vec::new(),
             mhl_path: None,
             cancelled: false,
         }
@@ -598,6 +616,16 @@ mod tests {
         assert!(html.contains("class=\"files\""));
         assert!(html.contains("C0005.MP4"));
         assert!(html.contains("access denied"));
+    }
+
+    #[test]
+    fn missing_files_render_in_both_the_transfer_row_and_the_files_section() {
+        let mut entry = sample_entry("job-1", "G:\\", "D:\\Offload");
+        entry.missing_files.push("C0006.MP4".to_string());
+        let html = generate_report_html(&[entry], &default_request(), None);
+        assert!(html.contains("1 missing"));
+        assert!(html.contains("class=\"files\""));
+        assert!(html.contains("C0006.MP4"));
     }
 
     #[test]

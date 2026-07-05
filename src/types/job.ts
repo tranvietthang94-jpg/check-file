@@ -53,6 +53,9 @@ export interface TransferJob {
   deletedSourceFiles: string[];
   moveDeleteFailed: FailedFile[];
   brokenMediaFiles: string[];
+  /** OffShoot's "Missing Files Detection" -- destination-relative paths a
+   * final post-transfer presence sweep couldn't find on disk. */
+  missingFiles: string[];
   /** Non-null while a Broken Media alert is awaiting Continue/Cancel from the user. */
   pendingBrokenMedia: string[] | null;
   /** The source's volume identifier recorded when this job started (see Source Index). */
@@ -88,6 +91,7 @@ export interface CompleteEventPayload {
   deletedSourceFiles: string[];
   moveDeleteFailed: FailedFile[];
   brokenMediaFiles: string[];
+  missingFiles: string[];
 }
 
 export interface CancelledEventPayload {

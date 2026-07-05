@@ -173,6 +173,7 @@ function App() {
         deletedSourceFiles: [],
         moveDeleteFailed: [],
         brokenMediaFiles: [],
+        missingFiles: [],
         pendingBrokenMedia: null,
         sourceVolumeSignature: payload.sourceVolumeSignature,
         resumeBlockedReason: null,
@@ -202,6 +203,11 @@ function App() {
           notifyTransfer(
             "Lượt truyền hoàn tất nhưng có lỗi",
             `${label}: ${payload.failedFiles.length} tệp thất bại`,
+          );
+        } else if (payload.missingFiles.length > 0) {
+          notifyTransfer(
+            "Phát hiện tệp bị thiếu ở đích",
+            `${label}: ${payload.missingFiles.length} tệp không thấy trên đích sau khi truyền xong`,
           );
         } else {
           notifyTransfer(

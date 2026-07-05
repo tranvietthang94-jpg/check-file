@@ -35,7 +35,7 @@ interface TransfersPanelProps {
 function progressBarColor(job: TransferJob): string {
   if (job.status === "cancelled") return "bg-orange-500";
   if (job.status === "complete") {
-    if (job.failedFiles.length > 0) return "bg-red-400";
+    if (job.failedFiles.length > 0 || job.missingFiles.length > 0) return "bg-red-400";
     if (job.brokenMediaFiles.length > 0) return "bg-orange-500";
     return "bg-green-500";
   }
@@ -60,7 +60,7 @@ const STATUS_LABEL: Record<TransferJob["status"], string> = {
  * a status badge instead of an action button). */
 function statusBadgeTone(job: TransferJob): BadgeTone {
   if (job.status === "cancelled") return "orange";
-  if (job.failedFiles.length > 0) return "red";
+  if (job.failedFiles.length > 0 || job.missingFiles.length > 0) return "red";
   if (job.brokenMediaFiles.length > 0) return "orange";
   return "green";
 }
@@ -73,7 +73,11 @@ function isActive(job: TransferJob | undefined): boolean {
  * same three triggers OffShoot documents for Resume (stopped, failed,
  * completed with warnings). */
 function canResume(job: TransferJob): boolean {
-  return job.status === "cancelled" || (job.status === "complete" && job.failedFiles.length > 0);
+  return (
+    job.status === "cancelled" ||
+    (job.status === "complete" &&
+      (job.failedFiles.length > 0 || job.missingFiles.length > 0))
+  );
 }
 
 function JobRow({
@@ -218,6 +222,16 @@ function JobRow({
       {job.failedFiles.length > 0 && (
         <p className="text-xs text-red-400" title={job.failedFiles[0].message}>
           {job.failedFiles.length} tệp thất bại — {job.failedFiles[0].message}
+        </p>
+      )}
+      {job.missingFiles.length > 0 && (
+        <p
+          className="flex items-start gap-1.5 text-xs text-red-400"
+          title={job.missingFiles.join(", ")}
+        >
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {job.missingFiles.length} tệp không thấy ở đích sau khi truyền xong (Missing Files
+          Detection)
         </p>
       )}
       {job.deletedSourceFiles.length > 0 && (

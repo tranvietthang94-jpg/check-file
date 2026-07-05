@@ -146,6 +146,12 @@ pub struct CompletePayload {
     /// whether or not the job actually paused on them (empty when
     /// `auto_continue_on_broken_media` was on or none were found).
     pub broken_media_files: Vec<String>,
+    /// OffShoot's "Missing Files Detection": destination-relative paths this
+    /// job copied or skipped-as-duplicate, but that a final presence sweep
+    /// couldn't find on disk after a clean (non-cancelled) transfer. Distinct
+    /// from `failed_files` (already-known copy errors) and from a manual
+    /// Verify MHL pass -- this is a pure presence check, not a re-hash.
+    pub missing_files: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -192,6 +198,8 @@ pub struct CopyOutcome {
     /// Source-relative paths of every 0-byte file found on the source. See
     /// `BrokenMediaPayload`.
     pub broken_media_files: Vec<String>,
+    /// See `CompletePayload::missing_files`.
+    pub missing_files: Vec<String>,
 }
 
 /// Destination for scan/progress notifications. Kept separate from Tauri so
@@ -558,6 +566,7 @@ pub fn run_copy_core(
                 deleted_source_files: Vec::new(),
                 move_delete_failed: Vec::new(),
                 broken_media_files: Vec::new(),
+                missing_files: Vec::new(),
             };
         }
     };
@@ -600,6 +609,7 @@ pub fn run_copy_core(
             deleted_source_files: Vec::new(),
             move_delete_failed: Vec::new(),
             broken_media_files,
+            missing_files: Vec::new(),
         };
     }
 
@@ -971,6 +981,15 @@ pub fn run_copy_core(
         }
     }
 
+    // OffShoot's "Missing Files Detection": skipped for a cancelled job (an
+    // incomplete transfer is expected to be missing files -- that's not a
+    // surprise worth alerting on).
+    let missing_files = if cancelled {
+        Vec::new()
+    } else {
+        find_missing_files(destination, &mhl_entries, &skipped_files)
+    };
+
     CopyOutcome {
         cancelled,
         files_copied: tracker.files_copied,
@@ -983,7 +1002,29 @@ pub fn run_copy_core(
         deleted_source_files,
         move_delete_failed,
         broken_media_files,
+        missing_files,
     }
+}
+
+/// OffShoot's "Missing Files Detection": at the end of a transfer, checks
+/// that every file this job believes it left on the destination -- anything
+/// actually copied/moved into place (`mhl_entries`) plus anything skipped as
+/// an already-present duplicate (`skipped_files`) -- still exists there. A
+/// pure presence check (no re-read/re-hash), so it also catches a file
+/// vanishing between being written and the job finishing (another process,
+/// a flaky removable disk) that per-file verification during copy can't see.
+fn find_missing_files(
+    destination: &Path,
+    mhl_entries: &[MhlFileEntry],
+    skipped_files: &[SkippedFile],
+) -> Vec<String> {
+    mhl_entries
+        .iter()
+        .map(|e| &e.relative_path)
+        .chain(skipped_files.iter().map(|s| &s.path))
+        .filter(|relative| !destination.join(relative).exists())
+        .cloned()
+        .collect()
 }
 
 struct TauriProgressSink<'a, R: Runtime> {
@@ -1086,6 +1127,7 @@ pub fn run_copy_job<R: Runtime>(
                 deleted_source_files: outcome.deleted_source_files.clone(),
                 move_delete_failed: outcome.move_delete_failed.clone(),
                 broken_media_files: outcome.broken_media_files.clone(),
+                missing_files: outcome.missing_files.clone(),
             },
         );
     }
@@ -1122,6 +1164,7 @@ pub fn run_copy_job<R: Runtime>(
         deleted_source_files: outcome.deleted_source_files.clone(),
         move_delete_failed: outcome.move_delete_failed.clone(),
         broken_media_files: outcome.broken_media_files.clone(),
+        missing_files: outcome.missing_files.clone(),
         mhl_path,
         cancelled: outcome.cancelled,
     };
@@ -1199,6 +1242,95 @@ mod tests {
         assert_eq!(
             fs::read(dst_dir.path().join("nested").join("b.bin")).unwrap(),
             vec![7u8; 5000]
+        );
+    }
+
+    #[test]
+    fn find_missing_files_flags_a_gone_file_but_not_a_present_one() {
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(dst_dir.path().join("present.mp4"), b"data").unwrap();
+        // "gone.mp4" is deliberately never created on disk.
+
+        let entry = |relative_path: &str| MhlFileEntry {
+            relative_path: relative_path.to_string(),
+            size: 4,
+            modified: SystemTime::now(),
+            checksum: Some("abc".to_string()),
+            algorithm: ChecksumAlgorithm::Xxh64,
+            hashed_at: SystemTime::now(),
+            legacy_checksum: None,
+            legacy_algorithm: None,
+        };
+        let mhl_entries = vec![entry("present.mp4"), entry("gone.mp4")];
+
+        let missing = find_missing_files(dst_dir.path(), &mhl_entries, &[]);
+        assert_eq!(missing, vec!["gone.mp4".to_string()]);
+    }
+
+    #[test]
+    fn find_missing_files_also_checks_skipped_duplicate_files() {
+        let dst_dir = tempfile::tempdir().unwrap();
+        // "existing.mp4" is deliberately never created, simulating it
+        // vanishing after being scanned as an already-present duplicate to skip.
+        let skipped = vec![SkippedFile {
+            path: "existing.mp4".to_string(),
+        }];
+
+        let missing = find_missing_files(dst_dir.path(), &[], &skipped);
+        assert_eq!(missing, vec!["existing.mp4".to_string()]);
+    }
+
+    #[test]
+    fn a_clean_transfer_reports_no_missing_files() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("a.txt"), b"hello world").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-clean-missing".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+            false,
+            None,
+        );
+
+        assert!(outcome.missing_files.is_empty());
+    }
+
+    #[test]
+    fn a_cancelled_job_never_reports_missing_files() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::write(src_dir.path().join("big.bin"), vec![1u8; 5 * 1024 * 1024]).unwrap();
+
+        let cancel_flag = AtomicBool::new(true); // pre-cancelled
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-cancel-missing".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::Transfer,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+            false,
+            None,
+        );
+
+        assert!(outcome.cancelled);
+        assert!(
+            outcome.missing_files.is_empty(),
+            "an incomplete/cancelled transfer is expected to be missing files -- not a Missing Files alert"
         );
     }
 

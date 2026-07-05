@@ -57,6 +57,11 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
             {entry.moveDeleteFailed.length} di chuyển-xóa thất bại
           </span>
         )}
+        {entry.missingFiles.length > 0 && (
+          <span className="text-red-400" title={entry.missingFiles.join(", ")}>
+            {entry.missingFiles.length} tệp bị thiếu ở đích
+          </span>
+        )}
         {mhlName && <span title={entry.mhlPath ?? undefined}>MHL: {mhlName}</span>}
       </div>
       <Button variant="secondary" className="mt-1 w-fit" onClick={() => onViewClips(entry.destination)}>
