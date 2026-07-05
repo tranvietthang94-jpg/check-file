@@ -1,16 +1,21 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { GeneralPreferences } from "./preferences/GeneralPreferences";
 import { DisksPreferences } from "./preferences/DisksPreferences";
 import { OrganizePreferences } from "./preferences/OrganizePreferences";
 import { TransfersPreferences } from "./preferences/TransfersPreferences";
+import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
+import { Panel } from "./ui/Panel";
+import { SectionHeading } from "./ui/SectionHeading";
+import { ArrowLeftRight, FolderTree, HardDrive, Settings, X } from "./icons";
 
 type Tab = "general" | "disks" | "organize" | "transfers";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "general", label: "Chung" },
-  { id: "disks", label: "Ổ đĩa" },
-  { id: "organize", label: "Tổ chức" },
-  { id: "transfers", label: "Truyền tải" },
+const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+  { id: "general", label: "Chung", icon: <Settings className="h-3.5 w-3.5" /> },
+  { id: "disks", label: "Ổ đĩa", icon: <HardDrive className="h-3.5 w-3.5" /> },
+  { id: "organize", label: "Tổ chức", icon: <FolderTree className="h-3.5 w-3.5" /> },
+  { id: "transfers", label: "Truyền tải", icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
 ];
 
 interface PreferencesModalProps {
@@ -28,37 +33,27 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
       onClick={onClose}
     >
-      <div
-        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded border border-neutral-800 bg-neutral-950"
+      <Panel
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-            Cài đặt
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-neutral-700 px-2 py-1 text-xs"
-          >
-            Đóng
-          </button>
+          <SectionHeading>Cài đặt</SectionHeading>
+          <IconButton onClick={onClose} aria-label="Đóng" icon={<X className="h-3.5 w-3.5" />} />
         </div>
 
         <div className="flex gap-1 border-b border-neutral-800 px-4 py-2">
           {TABS.map((t) => (
-            <button
+            <Button
               key={t.id}
-              type="button"
+              variant="ghost"
+              active={tab === t.id}
+              icon={t.icon}
               onClick={() => setTab(t.id)}
-              className={`rounded px-3 py-1.5 text-xs uppercase tracking-wide ${
-                tab === t.id
-                  ? "bg-neutral-800 text-neutral-100"
-                  : "text-neutral-500 hover:text-neutral-300"
-              }`}
+              className="uppercase"
             >
               {t.label}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -68,7 +63,7 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps) {
           {tab === "organize" && <OrganizePreferences />}
           {tab === "transfers" && <TransfersPreferences />}
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }

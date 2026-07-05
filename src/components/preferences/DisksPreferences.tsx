@@ -1,4 +1,8 @@
 import { useDisksStore } from "../../state/disksStore";
+import { SectionHeading } from "../ui/SectionHeading";
+import { Button } from "../ui/Button";
+import { EmptyState } from "../ui/EmptyState";
+import { Eye, EyeOff } from "../icons";
 
 export function DisksPreferences() {
   const disks = useDisksStore((s) => s.disks);
@@ -9,13 +13,11 @@ export function DisksPreferences() {
 
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Ổ đĩa đã ẩn
-      </h3>
+      <SectionHeading as="h3">Ổ đĩa đã ẩn</SectionHeading>
       {hiddenDisks.length === 0 ? (
-        <p className="text-xs text-neutral-500">
+        <EmptyState icon={<EyeOff className="h-5 w-5" />}>
           Không có ổ đĩa nào bị ẩn. Dùng "Ẩn" trên một ổ đĩa ở màn Ổ đĩa để ẩn nó khỏi danh sách.
-        </p>
+        </EmptyState>
       ) : (
         <ul className="flex flex-col gap-1">
           {hiddenDisks.map((disk) => (
@@ -26,13 +28,13 @@ export function DisksPreferences() {
               <span className="truncate text-neutral-400">
                 {disk.name} · {disk.mountPoint}
               </span>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
+                icon={<Eye className="h-3.5 w-3.5" />}
                 onClick={() => unhideDisk(disk.id)}
-                className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
               >
                 Bỏ ẩn
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

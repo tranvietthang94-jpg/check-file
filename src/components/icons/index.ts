@@ -22,4 +22,7 @@ export {
   ArrowUpFromLine,
   Inbox,
   TriangleAlert,
+  FolderTree,
+  Eye,
+  Save,
 } from "lucide-react";

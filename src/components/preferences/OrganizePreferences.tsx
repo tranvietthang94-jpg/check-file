@@ -5,6 +5,12 @@ import { usePresetsStore } from "../../state/presetsStore";
 import { useSettingsStore } from "../../state/settingsStore";
 import { effectiveJobDate, previewDestinationPath, renderTemplate } from "../../lib/tokenEngine";
 import { TemplateBuilder, type TemplateToken } from "../organize/TemplateBuilder";
+import { SectionHeading } from "../ui/SectionHeading";
+import { Checkbox, Radio } from "../ui/Checkbox";
+import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
+import { EmptyState } from "../ui/EmptyState";
+import { Plus, Save, Trash2, X } from "../icons";
 import type { SelectiveCopyMode } from "../../types/organize";
 
 const DATE_SUB_TOKENS = ["YYYY", "YY", "MM", "DD", "hh", "mm", "ss"];
@@ -125,12 +131,12 @@ function PresetsSection() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Mẫu cấu hình</h3>
+      <SectionHeading as="h3">Mẫu cấu hình</SectionHeading>
 
       {loading && <p className="text-xs text-neutral-500">Đang tải…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
       {!loading && presets.length === 0 && (
-        <p className="text-xs text-neutral-500">Chưa lưu mẫu cấu hình nào.</p>
+        <EmptyState icon={<Save className="h-5 w-5" />}>Chưa lưu mẫu cấu hình nào.</EmptyState>
       )}
 
       <ul className="flex flex-col gap-1">
@@ -143,22 +149,17 @@ function PresetsSection() {
               {preset.name}
             </span>
             <span className="flex shrink-0 gap-1">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => handleLoad(preset.name)}
-                className="rounded border border-neutral-700 px-2 py-1 disabled:opacity-40"
-              >
+              <Button variant="secondary" disabled={busy} onClick={() => handleLoad(preset.name)}>
                 Tải
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                variant="danger"
+                icon={<Trash2 className="h-3.5 w-3.5" />}
                 disabled={busy}
                 onClick={() => handleDelete(preset.name)}
-                className="rounded border border-neutral-700 px-2 py-1 text-red-400 disabled:opacity-40"
               >
                 Xóa
-              </button>
+              </Button>
             </span>
           </li>
         ))}
@@ -172,14 +173,14 @@ function PresetsSection() {
           autoComplete="off"
           className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
         />
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          icon={<Save className="h-3.5 w-3.5" />}
           disabled={busy || newName.trim() === ""}
           onClick={handleSave}
-          className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
         >
           Lưu cấu hình hiện tại
-        </button>
+        </Button>
       </div>
     </section>
   );
@@ -291,9 +292,7 @@ export function OrganizePreferences() {
       <PresetsSection />
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Tổ chức
-        </h3>
+        <SectionHeading as="h3">Tổ chức</SectionHeading>
 
         <div className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
@@ -347,15 +346,13 @@ export function OrganizePreferences() {
           </span>
           <div className="flex gap-3 text-xs">
             {(["exclude", "include"] as SelectiveCopyMode[]).map((m) => (
-              <label key={m} className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="selective-copy-mode"
-                  checked={selectiveCopy.mode === m}
-                  onChange={() => setSelectiveCopyMode(m)}
-                />
-                {m === "exclude" ? "Không sao chép" : "Chỉ sao chép"}
-              </label>
+              <Radio
+                key={m}
+                name="selective-copy-mode"
+                checked={selectiveCopy.mode === m}
+                onChange={() => setSelectiveCopyMode(m)}
+                label={m === "exclude" ? "Không sao chép" : "Chỉ sao chép"}
+              />
             ))}
           </div>
           <input
@@ -370,56 +367,53 @@ export function OrganizePreferences() {
           />
         </div>
 
-        <label className="flex items-start gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={skipModificationDateCheck}
-            onChange={(e) => setSkipModificationDateCheck(e.currentTarget.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Bỏ qua kiểm tra ngày sửa đổi
+        <Checkbox
+          align="start"
+          checked={skipModificationDateCheck}
+          onChange={(e) => setSkipModificationDateCheck(e.currentTarget.checked)}
+          label={
+            <span>
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Bỏ qua kiểm tra ngày sửa đổi
+              </span>
+              <span className="block text-neutral-500">
+                Phát hiện trùng lặp chỉ so khớp tên + kích thước -- dùng cho quy trình mà thời gian
+                sửa đổi của tệp không đáng tin cậy.
+              </span>
             </span>
-            <span className="block text-neutral-500">
-              Phát hiện trùng lặp chỉ so khớp tên + kích thước -- dùng cho quy trình mà thời gian sửa
-              đổi của tệp không đáng tin cậy.
-            </span>
-          </span>
-        </label>
+          }
+        />
 
-        <label className="flex items-start gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={autoContinueOnBrokenMedia}
-            onChange={(e) => setAutoContinueOnBrokenMedia(e.currentTarget.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Tự động tiếp tục khi Media hỏng
+        <Checkbox
+          align="start"
+          checked={autoContinueOnBrokenMedia}
+          onChange={(e) => setAutoContinueOnBrokenMedia(e.currentTarget.checked)}
+          label={
+            <span>
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Tự động tiếp tục khi Media hỏng
+              </span>
+              <span className="block text-neutral-500">
+                Bỏ qua cảnh báo khi phát hiện tệp 0 byte ở nguồn và vẫn sao chép. Mặc định tắt, để
+                thẻ nhớ bị lỗi được cảnh báo trước khi sao chép bất kỳ thứ gì.
+              </span>
             </span>
-            <span className="block text-neutral-500">
-              Bỏ qua cảnh báo khi phát hiện tệp 0 byte ở nguồn và vẫn sao chép. Mặc định tắt, để thẻ
-              nhớ bị lỗi được cảnh báo trước khi sao chép bất kỳ thứ gì.
-            </span>
-          </span>
-        </label>
+          }
+        />
 
         <div className="flex flex-col gap-1">
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={bundleEnabled}
-              onChange={(e) => {
-                setBundleEnabled(e.currentTarget.checked);
-                commitBundle(e.currentTarget.checked, bundleName, bundleMaxMb);
-              }}
-            />
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Bỏ qua thư mục gói (bundle)
-            </span>
-          </label>
+          <Checkbox
+            checked={bundleEnabled}
+            onChange={(e) => {
+              setBundleEnabled(e.currentTarget.checked);
+              commitBundle(e.currentTarget.checked, bundleName, bundleMaxMb);
+            }}
+            label={
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Bỏ qua thư mục gói (bundle)
+              </span>
+            }
+          />
           {bundleEnabled && (
             <div className="flex gap-2">
               <input
@@ -435,6 +429,7 @@ export function OrganizePreferences() {
               <input
                 type="number"
                 min={0}
+                title="Kích thước tối đa (MB)"
                 value={bundleMaxMb}
                 onChange={(e) => {
                   setBundleMaxMb(e.currentTarget.value);
@@ -447,24 +442,18 @@ export function OrganizePreferences() {
           )}
         </div>
 
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={flatten}
-            onChange={(e) => setFlatten(e.currentTarget.checked)}
-          />
-          Làm phẳng (bỏ thư mục con gốc)
-        </label>
+        <Checkbox
+          checked={flatten}
+          onChange={(e) => setFlatten(e.currentTarget.checked)}
+          label="Làm phẳng (bỏ thư mục con gốc)"
+        />
 
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={ignoreEmptyFolders}
-            onChange={(e) => setIgnoreEmptyFolders(e.currentTarget.checked)}
-            disabled={flatten}
-          />
-          <span className={flatten ? "opacity-40" : undefined}>Bỏ qua thư mục rỗng</span>
-        </label>
+        <Checkbox
+          checked={ignoreEmptyFolders}
+          onChange={(e) => setIgnoreEmptyFolders(e.currentTarget.checked)}
+          disabled={flatten}
+          label="Bỏ qua thư mục rỗng"
+        />
 
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
@@ -495,14 +484,13 @@ export function OrganizePreferences() {
               >
                 {`{${element.name}}`}
               </span>
-              <button
-                type="button"
+              <IconButton
+                tone="neutral"
                 onClick={() => removeElement(element.name)}
                 title={`Xóa {${element.name}}`}
-                className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
-              >
-                ×
-              </button>
+                aria-label={`Xóa {${element.name}}`}
+                icon={<X className="h-3.5 w-3.5" />}
+              />
             </div>
           ))}
 
@@ -517,13 +505,9 @@ export function OrganizePreferences() {
               autoComplete="off"
               className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
             />
-            <button
-              type="button"
-              onClick={commitNewElement}
-              className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
-            >
-              + Thêm
-            </button>
+            <Button variant="secondary" icon={<Plus className="h-3.5 w-3.5" />} onClick={commitNewElement}>
+              Thêm
+            </Button>
           </div>
           <p className="text-[10px] leading-relaxed text-neutral-600">
             Gõ token (vd {"{Location}"}) vào Mẫu đổi tên hoặc Mẫu thư mục ở trên để dùng nó. Giá trị
@@ -532,19 +516,18 @@ export function OrganizePreferences() {
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={autoLabel.enabled}
-              onChange={(e) => {
-                setAutoLabelEnabled(e.currentTarget.checked);
-                useDisksStore.getState().recomputeAutoLabels();
-              }}
-            />
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Tự động gắn nhãn nguồn mới
-            </span>
-          </label>
+          <Checkbox
+            checked={autoLabel.enabled}
+            onChange={(e) => {
+              setAutoLabelEnabled(e.currentTarget.checked);
+              useDisksStore.getState().recomputeAutoLabels();
+            }}
+            label={
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Tự động gắn nhãn nguồn mới
+              </span>
+            }
+          />
 
           {autoLabel.enabled && (
             <>
