@@ -393,18 +393,40 @@ function App() {
           />
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
-          <TransfersPanel
-            groups={Object.values(groups)}
-            jobs={jobs}
-            onCancelJob={handleCancelJob}
-            onCancelGroup={handleCancelGroup}
-            onResumeJob={handleResumeJob}
-            onResolveBrokenMedia={handleResolveBrokenMedia}
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+          <EndpointList
+            title="Sources"
+            endpoints={sources}
+            disks={disks}
+            onRemove={removeSource}
+            onLabelChange={setSourceLabel}
+            onPathChange={setSourcePath}
+            onBrowse={handleBrowse}
+            onDropDisk={addSource}
           />
-          <TransferLogPanel onViewClips={handleBrowse} />
-          <ReportsPanel />
-          <MhlVerifyPanel />
+          <div className="flex flex-col gap-6 md:col-span-2">
+            <TransfersPanel
+              groups={Object.values(groups)}
+              jobs={jobs}
+              onCancelJob={handleCancelJob}
+              onCancelGroup={handleCancelGroup}
+              onResumeJob={handleResumeJob}
+              onResolveBrokenMedia={handleResolveBrokenMedia}
+            />
+            <TransferLogPanel onViewClips={handleBrowse} />
+            <ReportsPanel />
+            <MhlVerifyPanel />
+          </div>
+          <EndpointList
+            title="Destinations"
+            endpoints={destinations}
+            disks={disks}
+            onRemove={removeDestination}
+            onLabelChange={setDestinationLabel}
+            onPathChange={setDestinationPath}
+            usageKind="free"
+            onDropDisk={addDestination}
+          />
         </div>
       )}
 
