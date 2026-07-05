@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   cancelCopy,
   getVolumeSignature,
@@ -26,11 +26,9 @@ import { useTransferLogStore } from "./state/transferLogStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { GroupComposer } from "./components/GroupComposer";
 import { MediaBrowser } from "./components/MediaBrowser";
-import { OrganizePanel } from "./components/OrganizePanel";
-import { PresetsPanel } from "./components/PresetsPanel";
+import { PreferencesModal } from "./components/PreferencesModal";
 import { ReportsPanel } from "./components/ReportsPanel";
 import { MhlVerifyPanel } from "./components/MhlVerifyPanel";
 import { TransferLogPanel } from "./components/TransferLogPanel";
@@ -48,6 +46,9 @@ function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
 }
 
 function App() {
+  const [view, setView] = useState<"disks" | "transfers">("disks");
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+
   const disks = useDisksStore((s) => s.disks);
   const sources = useDisksStore((s) => s.sources);
   const destinations = useDisksStore((s) => s.destinations);
@@ -327,30 +328,58 @@ function App() {
 
   return (
     <main className="min-h-screen bg-neutral-950 p-6 text-neutral-100">
-      <h1 className="mb-6 text-xl font-semibold">OffloadKit</h1>
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-5">
-        <DisksPanel />
-        <EndpointList
-          title="Sources"
-          endpoints={sources}
-          disks={disks}
-          onRemove={removeSource}
-          onLabelChange={setSourceLabel}
-          onPathChange={setSourcePath}
-          onBrowse={handleBrowse}
-        />
-        <EndpointList
-          title="Destinations"
-          endpoints={destinations}
-          disks={disks}
-          onRemove={removeDestination}
-          onLabelChange={setDestinationLabel}
-          onPathChange={setDestinationPath}
-        />
-        <div className="flex flex-col gap-6">
-          <SettingsPanel />
-          <OrganizePanel />
-          <PresetsPanel />
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">OffloadKit</h1>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded border border-neutral-800">
+            {(
+              [
+                { id: "disks", label: "Disks" },
+                { id: "transfers", label: "Transfers" },
+              ] as const
+            ).map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setView(v.id)}
+                className={`px-3 py-1.5 text-xs ${
+                  view === v.id ? "bg-neutral-800 text-neutral-100" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setPreferencesOpen(true)}
+            className="rounded border border-neutral-700 px-3 py-1.5 text-xs"
+          >
+            Preferences
+          </button>
+        </div>
+      </div>
+
+      {view === "disks" ? (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+          <DisksPanel />
+          <EndpointList
+            title="Sources"
+            endpoints={sources}
+            disks={disks}
+            onRemove={removeSource}
+            onLabelChange={setSourceLabel}
+            onPathChange={setSourcePath}
+            onBrowse={handleBrowse}
+          />
+          <EndpointList
+            title="Destinations"
+            endpoints={destinations}
+            disks={disks}
+            onRemove={removeDestination}
+            onLabelChange={setDestinationLabel}
+            onPathChange={setDestinationPath}
+          />
           <GroupComposer
             sources={sources}
             destinations={destinations}
@@ -358,27 +387,33 @@ function App() {
             onStart={handleStartGroup}
           />
         </div>
-        <TransfersPanel
-          groups={Object.values(groups)}
-          jobs={jobs}
-          onCancelJob={handleCancelJob}
-          onCancelGroup={handleCancelGroup}
-          onResumeJob={handleResumeJob}
-          onResolveBrokenMedia={handleResolveBrokenMedia}
-        />
-        <TransferLogPanel onViewClips={handleBrowse} />
-        <ReportsPanel />
-        <MhlVerifyPanel />
-        {activeScan && (
-          <MediaBrowser
-            folder={activeScan.folder}
-            entries={activeScan.entries}
-            status={activeScan.status}
-            total={activeScan.total}
-            onClose={() => setActiveScan(null)}
+      ) : (
+        <div className="flex flex-col gap-6">
+          <TransfersPanel
+            groups={Object.values(groups)}
+            jobs={jobs}
+            onCancelJob={handleCancelJob}
+            onCancelGroup={handleCancelGroup}
+            onResumeJob={handleResumeJob}
+            onResolveBrokenMedia={handleResolveBrokenMedia}
           />
-        )}
-      </div>
+          <TransferLogPanel onViewClips={handleBrowse} />
+          <ReportsPanel />
+          <MhlVerifyPanel />
+        </div>
+      )}
+
+      <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
+
+      {activeScan && (
+        <MediaBrowser
+          folder={activeScan.folder}
+          entries={activeScan.entries}
+          status={activeScan.status}
+          total={activeScan.total}
+          onClose={() => setActiveScan(null)}
+        />
+      )}
     </main>
   );
 }
