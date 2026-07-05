@@ -3,6 +3,7 @@ import { useDisksStore } from "../state/disksStore";
 import { useTransfersStore } from "../state/transfersStore";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
+import { DriveIcon } from "./icons/DriveIcon";
 import type { DiskInfo } from "../types/disk";
 import type { TransferJob } from "../types/job";
 
@@ -66,13 +67,16 @@ export function DisksPanel() {
               key={disk.id}
               className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2"
             >
-              <div className="flex flex-col">
-                <span className="font-medium">{disk.name}</span>
-                <span className="text-xs text-neutral-500">
-                  {disk.mountPoint} · {formatBytes(disk.availableBytes)} free of{" "}
-                  {formatBytes(disk.totalBytes)}
-                  {disk.isRemovable ? " · removable" : ""}
-                </span>
+              <div className="flex items-center gap-2">
+                <DriveIcon removable={disk.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
+                <div className="flex flex-col">
+                  <span className="font-medium">{disk.name}</span>
+                  <span className="text-xs text-neutral-500">
+                    {disk.mountPoint} · {formatBytes(disk.availableBytes)} free of{" "}
+                    {formatBytes(disk.totalBytes)}
+                    {disk.isRemovable ? " · removable" : ""}
+                  </span>
+                </div>
               </div>
               <div className="flex gap-2">
                 <button

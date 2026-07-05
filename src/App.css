@@ -17,26 +17,31 @@
 }
 
 /*
- * OffloadKit visual theme -- high-contrast "brutalist" DIT tool look
- * (see DESIGN.md). Overrides Tailwind's default token values only; every
- * component keeps using the same neutral, green, and red color utilities,
- * plus rounded and font-mono, so this file is the single place the reskin lives.
+ * OffloadKit visual theme -- airy/minimal look modeled on OffShoot's real
+ * app (soft charcoal surfaces, near-invisible card borders, gentle rounded
+ * corners), replacing the earlier high-contrast "brutalist" pass. Overrides
+ * Tailwind's default token values only; every component keeps using the
+ * same neutral, green, and red color utilities plus font-mono, so this file
+ * is the single place the reskin lives.
  */
 @theme {
   --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
 
-  /* neutral scale: 950 = page bg (pure black) up to 100 = brightest text */
-  --color-neutral-950: #000000;
-  --color-neutral-900: #111111;
-  --color-neutral-800: #444748;
-  --color-neutral-700: #8e9192;
-  --color-neutral-600: #6b6e6f;
-  --color-neutral-500: #9a9d9e;
-  --color-neutral-400: #c4c7c8;
-  --color-neutral-300: #e5e2e1;
-  --color-neutral-200: #e5e2e1;
-  --color-neutral-100: #e5e2e1;
+  /* neutral scale: 950 = page bg up to 100 = brightest text. 900 sits just
+     one step above the page bg (gentle elevation, not a hard black/white
+     split), and 800 (card border / hover bg) is close enough to 900 that
+     card edges read as a soft seam rather than a drawn line. */
+  --color-neutral-950: #18181b;
+  --color-neutral-900: #232327;
+  --color-neutral-800: #2c2c31;
+  --color-neutral-700: #4b4b52;
+  --color-neutral-600: #68686f;
+  --color-neutral-500: #8a8a92;
+  --color-neutral-400: #b4b4bc;
+  --color-neutral-300: #dcdce2;
+  --color-neutral-200: #ececf0;
+  --color-neutral-100: #ececf0;
 
   /* success / verified / complete / primary action */
   --color-green-500: #19ed60;
@@ -45,17 +50,9 @@
   /* error / failed / mismatch text */
   --color-red-400: #ffb4ab;
 
-  /* brutalist look: square corners everywhere (no rounded-* variant is
-     used in the codebase, but override the whole scale defensively) */
-  --radius: 0px;
-  --radius-xs: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-  --radius-3xl: 0px;
-  --radius-4xl: 0px;
+  /* no radius override here -- Tailwind's default rounded scale applies,
+     giving the gentle rounded corners OffShoot's own UI uses instead of
+     the brutalist pass's sharp 0px squares. */
 }
 
 /* Native checkbox/radio controls have no Tailwind utility hook in the

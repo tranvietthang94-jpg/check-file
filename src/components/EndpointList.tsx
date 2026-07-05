@@ -1,3 +1,4 @@
+import { DriveIcon } from "./icons/DriveIcon";
 import type { DiskInfo, Endpoint } from "../types/disk";
 
 /** Blue for a manually-typed label, a white outline for an Auto Label -- mirrors OffShoot. */
@@ -41,11 +42,14 @@ export function EndpointList({
               key={endpoint.diskId}
               className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2"
             >
-              <div className="flex flex-col">
-                <span className="font-medium">{disk?.name ?? endpoint.diskId}</span>
-                <span className="text-xs text-neutral-500">
-                  {disk?.mountPoint ?? "(unplugged)"}
-                </span>
+              <div className="flex items-center gap-2">
+                <DriveIcon removable={disk?.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
+                <div className="flex flex-col">
+                  <span className="font-medium">{disk?.name ?? endpoint.diskId}</span>
+                  <span className="text-xs text-neutral-500">
+                    {disk?.mountPoint ?? "(unplugged)"}
+                  </span>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <input

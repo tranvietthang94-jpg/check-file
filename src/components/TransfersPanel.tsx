@@ -1,6 +1,11 @@
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { TransferJob } from "../types/job";
 import type { TransferGroup } from "../types/transferGroup";
 import { formatBytes, formatSpeed } from "../lib/format";
+import { CancelIcon, ResumeIcon, RevealIcon } from "./icons/JobActionIcons";
+
+const ICON_BUTTON =
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-neutral-700 hover:bg-neutral-800";
 
 interface TransfersPanelProps {
   groups: TransferGroup[];
@@ -58,24 +63,36 @@ function JobRow({
           )}
           {job.destinationLabel}
         </span>
-        <span className="flex shrink-0 items-center gap-2">
+        <span className="flex shrink-0 items-center gap-1.5">
           {canResume(job) && (
             <button
               type="button"
               onClick={() => onResume(job)}
-              title="Start a fresh copy of the same source → destination -- already-offloaded files are skipped automatically"
-              className="rounded border border-neutral-700 px-2 py-1 text-xs text-blue-400"
+              title="Resume -- start a fresh copy of the same source → destination -- already-offloaded files are skipped automatically"
+              aria-label="Resume"
+              className={`${ICON_BUTTON} text-blue-400`}
             >
-              Resume
+              <ResumeIcon className="h-3.5 w-3.5" />
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => revealItemInDir(job.destinationPath).catch(console.error)}
+            title="Reveal destination in file explorer"
+            aria-label="Reveal in file explorer"
+            className={`${ICON_BUTTON} text-neutral-400`}
+          >
+            <RevealIcon className="h-3.5 w-3.5" />
+          </button>
           {isActive(job) ? (
             <button
               type="button"
               onClick={() => onCancel(job.id)}
-              className="rounded border border-neutral-700 px-2 py-1 text-xs text-red-400"
+              title="Cancel"
+              aria-label="Cancel"
+              className={`${ICON_BUTTON} text-red-400`}
             >
-              Cancel
+              <CancelIcon className="h-3.5 w-3.5" />
             </button>
           ) : (
             <span className="text-xs capitalize text-neutral-400">{job.status}</span>
