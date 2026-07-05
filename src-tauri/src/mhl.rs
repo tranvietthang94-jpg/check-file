@@ -41,12 +41,16 @@ pub(crate) fn iso8601(t: SystemTime) -> String {
 /// Element name for a hash choice, per the legacy MHL v1.1 XSD
 /// (mediahashlist.org) -- XXH64 is written big-endian under the
 /// `xxhash64be` tag, matching the "XXH64BE" convention this codebase
-/// already uses (see checksum::StreamingHasher::finalize_hex).
+/// already uses (see checksum::StreamingHasher::finalize_hex). C4 predates
+/// the legacy XSD and has no enumerated tag there; `"c4"` follows the same
+/// lowercase-algorithm-name convention as the others -- not verified against
+/// a real OffShoot-written MHL sample, since none was available to check.
 fn hash_tag(algorithm: ChecksumAlgorithm) -> &'static str {
     match algorithm {
         ChecksumAlgorithm::Xxh64 => "xxhash64be",
         ChecksumAlgorithm::Md5 => "md5",
         ChecksumAlgorithm::Sha1 => "sha1",
+        ChecksumAlgorithm::C4 => "c4",
     }
 }
 

@@ -20,11 +20,13 @@ const ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
   { value: "xxh64", label: "XXH64" },
   { value: "md5", label: "MD5" },
   { value: "sha1", label: "SHA-1" },
+  { value: "c4", label: "C4" },
 ];
 
 const LEGACY_ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
   { value: "sha1", label: "SHA-1" },
   { value: "md5", label: "MD5" },
+  { value: "c4", label: "C4" },
 ];
 
 const QUEUE_MODES: { value: QueueMode; label: string; hint: string }[] = [
