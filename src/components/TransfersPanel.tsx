@@ -41,8 +41,15 @@ function progressBarColor(job: TransferJob): string {
 }
 
 const MODE_LABEL: Record<TransferGroup["mode"], string> = {
-  parallel: "Parallel",
-  cascade: "Cascade",
+  parallel: "Song song",
+  cascade: "Nối tiếp",
+};
+
+const STATUS_LABEL: Record<TransferJob["status"], string> = {
+  queued: "Đang chờ",
+  copying: "Đang sao chép",
+  complete: "Hoàn tất",
+  cancelled: "Đã hủy",
 };
 
 function isActive(job: TransferJob | undefined): boolean {
@@ -74,8 +81,8 @@ function JobRow({
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs">
           {job.hop === 2 && (
-            <span className="mr-1 text-neutral-500" title="Relayed from the primary destination">
-              relay →
+            <span className="mr-1 text-neutral-500" title="Chuyển tiếp từ đích chính">
+              chuyển tiếp →
             </span>
           )}
           {job.destinationLabel}
@@ -85,8 +92,8 @@ function JobRow({
             <button
               type="button"
               onClick={() => onResume(job)}
-              title="Resume -- start a fresh copy of the same source → destination -- already-offloaded files are skipped automatically"
-              aria-label="Resume"
+              title="Tiếp tục -- sao chép lại từ đầu cùng nguồn → đích -- các tệp đã sao lưu sẽ tự động được bỏ qua"
+              aria-label="Tiếp tục"
               className={`${ICON_BUTTON} text-blue-400`}
             >
               <ResumeIcon className="h-3.5 w-3.5" />
@@ -95,8 +102,8 @@ function JobRow({
           <button
             type="button"
             onClick={() => revealItemInDir(job.destinationPath).catch(console.error)}
-            title="Reveal destination in file explorer"
-            aria-label="Reveal in file explorer"
+            title="Mở đích trong Explorer"
+            aria-label="Mở đích trong Explorer"
             className={`${ICON_BUTTON} text-neutral-400`}
           >
             <RevealIcon className="h-3.5 w-3.5" />
@@ -105,14 +112,14 @@ function JobRow({
             <button
               type="button"
               onClick={() => onCancel(job.id)}
-              title="Cancel"
-              aria-label="Cancel"
+              title="Hủy"
+              aria-label="Hủy"
               className={`${ICON_BUTTON} text-red-400`}
             >
               <CancelIcon className="h-3.5 w-3.5" />
             </button>
           ) : (
-            <span className="text-xs capitalize text-neutral-400">{job.status}</span>
+            <span className="text-xs text-neutral-400">{STATUS_LABEL[job.status]}</span>
           )}
         </span>
       </div>
@@ -145,8 +152,8 @@ function JobRow({
       {job.pendingBrokenMedia && (
         <div className="flex flex-col gap-2 rounded border border-orange-700 bg-orange-950/40 px-2 py-2 text-xs">
           <p className="text-orange-300" title={job.pendingBrokenMedia.join(", ")}>
-            ⚠ {job.pendingBrokenMedia.length} broken (0-byte) file(s) found on the source — likely a
-            card that dropped out mid-recording.
+            ⚠ Phát hiện {job.pendingBrokenMedia.length} tệp hỏng (0 byte) ở nguồn — có thể do thẻ nhớ
+            bị rút giữa lúc quay.
           </p>
           <div className="flex gap-2">
             <button
@@ -158,21 +165,21 @@ function JobRow({
               }
               className="rounded border border-neutral-700 px-2 py-1 text-neutral-200"
             >
-              Show in Finder
+              Hiện trong Explorer
             </button>
             <button
               type="button"
               onClick={() => onResolveBrokenMedia(job.id, true)}
               className="rounded border border-neutral-700 px-2 py-1 text-neutral-200"
             >
-              Continue Anyway
+              Vẫn tiếp tục
             </button>
             <button
               type="button"
               onClick={() => onResolveBrokenMedia(job.id, false)}
               className="rounded border border-neutral-700 px-2 py-1 text-red-400"
             >
-              Cancel Job
+              Hủy công việc
             </button>
           </div>
         </div>
@@ -183,8 +190,8 @@ function JobRow({
       {job.verifiedFiles.length > 0 && (
         <p className="text-xs text-green-500">
           {job.verificationMode === "sourceAndDestination"
-            ? `${job.verifiedFiles.length} file(s) verified (source = destination, `
-            : `${job.verifiedFiles.length} file(s) hashed (`}
+            ? `${job.verifiedFiles.length} tệp đã xác minh (nguồn = đích, `
+            : `${job.verifiedFiles.length} tệp đã băm (`}
           {job.verifiedFiles[0].algorithm.toUpperCase()})
         </p>
       )}
@@ -193,7 +200,7 @@ function JobRow({
           className="text-xs text-neutral-400"
           title={job.skippedFiles.map((f) => f.path).join(", ")}
         >
-          {job.skippedFiles.length} file(s) skipped (already offloaded)
+          {job.skippedFiles.length} tệp đã bỏ qua (đã sao lưu trước đó)
         </p>
       )}
       {job.renamedFiles.length > 0 && (
@@ -201,12 +208,12 @@ function JobRow({
           className="text-xs text-yellow-500"
           title={job.renamedFiles.map((f) => `${f.originalPath} → ${f.renamedTo}`).join(", ")}
         >
-          {job.renamedFiles.length} file(s) renamed (name already used by a different file)
+          {job.renamedFiles.length} tệp đã đổi tên (tên đã được dùng bởi tệp khác)
         </p>
       )}
       {job.failedFiles.length > 0 && (
         <p className="text-xs text-red-400" title={job.failedFiles[0].message}>
-          {job.failedFiles.length} file(s) failed — {job.failedFiles[0].message}
+          {job.failedFiles.length} tệp thất bại — {job.failedFiles[0].message}
         </p>
       )}
       {job.deletedSourceFiles.length > 0 && (
@@ -214,18 +221,18 @@ function JobRow({
           className="text-xs text-neutral-400"
           title={job.deletedSourceFiles.join(", ")}
         >
-          {job.deletedSourceFiles.length} file(s) moved (source removed after verified copy)
+          {job.deletedSourceFiles.length} tệp đã di chuyển (đã xóa nguồn sau khi sao chép được xác minh)
         </p>
       )}
       {job.moveDeleteFailed.length > 0 && (
         <p className="text-xs text-orange-400" title={job.moveDeleteFailed[0].message}>
-          {job.moveDeleteFailed.length} file(s) copied but the source could not be removed —{" "}
+          {job.moveDeleteFailed.length} tệp đã sao chép nhưng không xóa được nguồn —{" "}
           {job.moveDeleteFailed[0].message}
         </p>
       )}
       {!job.pendingBrokenMedia && job.brokenMediaFiles.length > 0 && (
         <p className="text-xs text-orange-400" title={job.brokenMediaFiles.join(", ")}>
-          {job.brokenMediaFiles.length} broken (0-byte) file(s) were found on the source
+          Phát hiện {job.brokenMediaFiles.length} tệp hỏng (0 byte) ở nguồn
         </p>
       )}
     </li>
@@ -243,9 +250,9 @@ export function TransfersPanel({
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Transfers
+        Truyền tải
       </h2>
-      {groups.length === 0 && <p className="text-sm text-neutral-500">No transfers yet.</p>}
+      {groups.length === 0 && <p className="text-sm text-neutral-500">Chưa có lượt truyền nào.</p>}
       <ul className="flex flex-col gap-3">
         {groups.map((group) => {
           const groupJobs = group.jobIds.map((id) => jobs[id]).filter((j): j is TransferJob => !!j);
@@ -272,7 +279,7 @@ export function TransfersPanel({
                     onClick={() => onCancelGroup(group)}
                     className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-red-400"
                   >
-                    Cancel Group
+                    Hủy nhóm
                   </button>
                 )}
               </div>
@@ -291,7 +298,7 @@ export function TransfersPanel({
                   groupJobs.length < group.destinationLabels.length &&
                   groupJobs.length > 0 &&
                   groupJobs[0].status === "complete" && (
-                    <li className="text-xs text-neutral-500">Waiting to relay…</li>
+                    <li className="text-xs text-neutral-500">Đang chờ chuyển tiếp…</li>
                   )}
               </ul>
             </li>

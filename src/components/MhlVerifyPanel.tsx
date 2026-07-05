@@ -2,11 +2,11 @@ import { useMhlVerifyStore } from "../state/mhlVerifyStore";
 import type { MhlEntryStatus, MhlVerifyReport } from "../types/mhl";
 
 const STATUS_LABEL: Record<MhlEntryStatus, string> = {
-  verified: "Verified",
-  mismatch: "Checksum mismatch",
-  missing: "Missing",
-  sizeMismatch: "Size mismatch",
-  noChecksumRecorded: "No checksum recorded",
+  verified: "Đã xác minh",
+  mismatch: "Sai lệch mã băm",
+  missing: "Bị thiếu",
+  sizeMismatch: "Sai lệch kích thước",
+  noChecksumRecorded: "Không có mã băm ghi nhận",
 };
 
 const STATUS_CLASS: Record<MhlEntryStatus, string> = {
@@ -27,8 +27,8 @@ function ReportCard({ report }: { report: MhlVerifyReport }) {
         </span>
         <span className={problems.length === 0 ? "text-green-400" : "text-red-400"}>
           {problems.length === 0
-            ? `${report.results.length} OK`
-            : `${problems.length} issue(s)`}
+            ? `${report.results.length} hợp lệ`
+            : `${problems.length} vấn đề`}
         </span>
       </div>
       <ul className="mt-1 flex flex-col gap-0.5">
@@ -56,11 +56,11 @@ export function MhlVerifyPanel() {
   return (
     <section className="col-span-full flex flex-col gap-2">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Verify MHL
+        Xác minh MHL
       </h2>
       <p className="text-xs text-neutral-500">
-        Re-checks an existing .mhl file's recorded checksums against the real files on disk --
-        no transfer required.
+        Kiểm tra lại mã băm đã ghi trong một tệp .mhl có sẵn so với các tệp thật trên đĩa -- không
+        cần chạy lượt truyền nào.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -71,7 +71,7 @@ export function MhlVerifyPanel() {
             checked={mode === "file"}
             onChange={() => setMode("file")}
           />
-          Single .mhl file
+          Một tệp .mhl
         </label>
         <label className="flex items-center gap-1 text-xs">
           <input
@@ -80,7 +80,7 @@ export function MhlVerifyPanel() {
             checked={mode === "folder"}
             onChange={() => setMode("folder")}
           />
-          All .mhl files in a folder
+          Tất cả tệp .mhl trong một thư mục
         </label>
       </div>
 
@@ -88,7 +88,7 @@ export function MhlVerifyPanel() {
         <input
           value={path}
           onChange={(e) => setPath(e.currentTarget.value)}
-          placeholder={mode === "file" ? "Full path to a .mhl file…" : "Full folder path…"}
+          placeholder={mode === "file" ? "Đường dẫn đầy đủ tới tệp .mhl…" : "Đường dẫn thư mục đầy đủ…"}
           autoComplete="off"
           className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
         />
@@ -98,7 +98,7 @@ export function MhlVerifyPanel() {
           onClick={() => runVerify()}
           className="w-fit shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
         >
-          {busy ? "Verifying…" : "Verify"}
+          {busy ? "Đang xác minh…" : "Xác minh"}
         </button>
       </div>
 
@@ -107,7 +107,7 @@ export function MhlVerifyPanel() {
       {reports && (
         <div className="flex flex-col gap-2">
           {reports.length === 0 ? (
-            <p className="text-xs text-neutral-500">No .mhl files found there.</p>
+            <p className="text-xs text-neutral-500">Không tìm thấy tệp .mhl nào ở đó.</p>
           ) : (
             reports.map((report) => <ReportCard key={report.mhlPath} report={report} />)
           )}

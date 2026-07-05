@@ -144,7 +144,7 @@ export function TemplateBuilder({
                     setMenuIndex(menuIndex === i ? null : i);
                   }}
                   className="text-green-400/70 hover:text-green-200"
-                  aria-label={`Options for {${seg.name}}`}
+                  aria-label={`Tùy chọn cho {${seg.name}}`}
                 >
                   ⌄
                 </button>
@@ -159,7 +159,7 @@ export function TemplateBuilder({
                     }}
                     className="whitespace-nowrap px-2 py-1 text-left font-mono text-[11px] text-neutral-200 hover:bg-neutral-800"
                   >
-                    Remove
+                    Xóa
                   </button>
                 </div>
               )}
@@ -195,7 +195,7 @@ export function TemplateBuilder({
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData(TOKEN_DRAG_MIME, t.name)}
                     onClick={() => appendToken(t.name)}
-                    title={`Add {${t.name}}`}
+                    title={`Thêm {${t.name}}`}
                     className="rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400 hover:border-green-500 hover:text-green-400"
                   >
                     {t.name}

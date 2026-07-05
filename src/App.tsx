@@ -198,13 +198,13 @@ function App() {
         const label = job ? `${job.sourceLabel} → ${job.destinationLabel}` : payload.jobId;
         if (payload.failedFiles.length > 0) {
           notifyTransfer(
-            "Transfer finished with errors",
-            `${label}: ${payload.failedFiles.length} file(s) failed`,
+            "Lượt truyền hoàn tất nhưng có lỗi",
+            `${label}: ${payload.failedFiles.length} tệp thất bại`,
           );
         } else {
           notifyTransfer(
-            "Transfer complete",
-            `${label}: ${payload.filesCopied} file(s), ${formatBytes(payload.bytesCopied)}`,
+            "Lượt truyền hoàn tất",
+            `${label}: ${payload.filesCopied} tệp, ${formatBytes(payload.bytesCopied)}`,
           );
         }
       }
@@ -215,7 +215,7 @@ function App() {
       if (desktopNotifications) {
         const job = useTransfersStore.getState().jobs[payload.jobId];
         const label = job ? `${job.sourceLabel} → ${job.destinationLabel}` : payload.jobId;
-        notifyTransfer("Transfer cancelled", label);
+        notifyTransfer("Đã hủy lượt truyền", label);
       }
     }
 
@@ -327,7 +327,7 @@ function App() {
     ) {
       setResumeBlockedReason(
         job.id,
-        "Source disk has changed since this transfer started -- reconnect the original source before resuming.",
+        "Ổ đĩa nguồn đã thay đổi kể từ khi lượt truyền này bắt đầu -- kết nối lại đúng ổ đĩa nguồn trước khi tiếp tục.",
       );
       return;
     }
@@ -365,8 +365,8 @@ function App() {
           <div className="flex rounded border border-neutral-800">
             {(
               [
-                { id: "disks", label: "Disks" },
-                { id: "transfers", label: "Transfers" },
+                { id: "disks", label: "Ổ đĩa" },
+                { id: "transfers", label: "Truyền tải" },
               ] as const
             ).map((v) => (
               <button
@@ -386,7 +386,7 @@ function App() {
             onClick={() => setPreferencesOpen(true)}
             className="rounded border border-neutral-700 px-3 py-1.5 text-xs"
           >
-            Preferences
+            Cài đặt
           </button>
         </div>
       </div>
@@ -394,7 +394,7 @@ function App() {
       {view === "disks" ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
           <EndpointList
-            title="Sources"
+            title="Nguồn"
             endpoints={sources}
             disks={disks}
             onRemove={removeSource}
@@ -407,7 +407,7 @@ function App() {
             <DisksPanel onVerifyRequested={() => setView("transfers")} />
           </div>
           <EndpointList
-            title="Destinations"
+            title="Đích"
             endpoints={destinations}
             disks={disks}
             onRemove={removeDestination}
@@ -422,7 +422,7 @@ function App() {
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
           <EndpointList
-            title="Sources"
+            title="Nguồn"
             endpoints={sources}
             disks={disks}
             onRemove={removeSource}
@@ -445,7 +445,7 @@ function App() {
             <MhlVerifyPanel />
           </div>
           <EndpointList
-            title="Destinations"
+            title="Đích"
             endpoints={destinations}
             disks={disks}
             onRemove={removeDestination}

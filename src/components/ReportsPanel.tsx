@@ -45,7 +45,7 @@ export function ReportsPanel() {
       return;
     }
     if (file.size > MAX_LOGO_BYTES) {
-      setLogoError("Logo image is too large (max 5 MB) -- pick a smaller file.");
+      setLogoError("Ảnh logo quá lớn (tối đa 5 MB) -- chọn tệp nhỏ hơn.");
       setLogoInputKey((k) => k + 1);
       return;
     }
@@ -56,7 +56,7 @@ export function ReportsPanel() {
     } catch {
       setLogoDataUrl(null);
       setLogoFileName(null);
-      setLogoError("Couldn't read that image -- try a different file.");
+      setLogoError("Không đọc được ảnh đó -- thử tệp khác.");
     }
   }
 
@@ -91,17 +91,18 @@ export function ReportsPanel() {
 
   return (
     <section className="col-span-full flex flex-col gap-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Reports</h2>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Báo cáo</h2>
 
       {logs.length === 0 ? (
         <p className="text-xs text-neutral-500">
-          No completed transfers yet -- Reports summarize one or more Transfer Log entries.
+          Chưa có lượt truyền nào hoàn tất -- Báo cáo tổng hợp một hoặc nhiều mục trong Nhật ký
+          truyền tải.
         </p>
       ) : (
         <>
           <div className="flex flex-col gap-1">
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Include in report
+              Đưa vào báo cáo
             </span>
             <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
               {logs.map((entry) => (
@@ -125,11 +126,11 @@ export function ReportsPanel() {
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs">
-              <span className="text-[10px] uppercase tracking-wide text-neutral-500">Title</span>
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">Tiêu đề</span>
               <input
                 value={title}
                 onChange={(e) => setTitle(e.currentTarget.value)}
-                placeholder="Transfer Report"
+                placeholder="Báo cáo truyền tải"
                 autoComplete="off"
                 className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
               />
@@ -138,14 +139,14 @@ export function ReportsPanel() {
             <div className="flex flex-col gap-1 text-xs">
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-                  Logo (optional)
+                  Logo (tùy chọn)
                 </span>
                 <div className="flex items-center gap-2">
                   <input
                     key={logoInputKey}
                     type="file"
                     accept="image/*"
-                    title="Report logo image"
+                    title="Ảnh logo báo cáo"
                     onChange={(e) => handleLogoChange(e.currentTarget.files?.[0])}
                     className="text-xs"
                   />
@@ -155,7 +156,7 @@ export function ReportsPanel() {
                       onClick={clearLogo}
                       className="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:text-neutral-200"
                     >
-                      Remove
+                      Xóa
                     </button>
                   )}
                 </div>
@@ -164,7 +165,7 @@ export function ReportsPanel() {
                 <div className="flex items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1">
                   <img
                     src={logoDataUrl}
-                    alt="Logo preview"
+                    alt="Xem trước logo"
                     className="h-8 max-w-[120px] object-contain"
                   />
                   <span className="truncate text-[10px] text-neutral-500">{logoFileName}</span>
@@ -175,11 +176,11 @@ export function ReportsPanel() {
           </div>
 
           <label className="flex flex-col gap-1 text-xs">
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">Notes</span>
+            <span className="text-[10px] uppercase tracking-wide text-neutral-500">Ghi chú</span>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.currentTarget.value)}
-              placeholder="Optional notes for this report…"
+              placeholder="Ghi chú tùy chọn cho báo cáo này…"
               rows={2}
               className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
             />
@@ -191,7 +192,7 @@ export function ReportsPanel() {
               checked={includeThumbnails}
               onChange={(e) => setIncludeThumbnails(e.currentTarget.checked)}
             />
-            Include clip thumbnails (slower -- re-reads files at their destination)
+            Kèm ảnh thu nhỏ clip (chậm hơn -- đọc lại tệp tại đích)
           </label>
 
           <button
@@ -200,12 +201,13 @@ export function ReportsPanel() {
             onClick={handleGenerate}
             className="w-fit rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
           >
-            {busy ? "Generating…" : "Generate Report"}
+            {busy ? "Đang tạo…" : "Tạo báo cáo"}
           </button>
 
           {status && (
             <p className="text-[10px] text-neutral-500">
-              Saved to {status} -- opened in your browser. Use Print &rarr; Save as PDF for a PDF copy.
+              Đã lưu tại {status} -- đã mở trong trình duyệt. Dùng In &rarr; Lưu dưới dạng PDF để có
+              bản PDF.
             </p>
           )}
           {error && <p className="text-[10px] text-red-400">{error}</p>}

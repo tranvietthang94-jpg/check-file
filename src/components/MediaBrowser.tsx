@@ -1,5 +1,12 @@
-import type { MediaEntry } from "../types/media";
+import type { MediaEntry, MediaKind } from "../types/media";
 import { formatBytes, formatDuration, formatFrameRate } from "../lib/format";
+
+const KIND_LABEL: Record<MediaKind, string> = {
+  video: "video",
+  audio: "âm thanh",
+  photo: "ảnh",
+  other: "khác",
+};
 
 interface MediaBrowserProps {
   folder: string;
@@ -41,20 +48,20 @@ export function MediaBrowser({ folder, entries, status, total, onClose }: MediaB
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-            Browse Source
+            Duyệt Nguồn
           </h2>
           <p className="truncate text-xs text-neutral-500">{folder}</p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <span className="text-xs text-neutral-500">
-            {status === "scanning" ? `Scanning… ${entries.length}` : `${total} file(s)`}
+            {status === "scanning" ? `Đang quét… ${entries.length}` : `${total} tệp`}
           </span>
           <button
             type="button"
             onClick={onClose}
             className="rounded border border-neutral-700 px-2 py-1 text-xs"
           >
-            Close
+            Đóng
           </button>
         </div>
       </div>
@@ -75,7 +82,7 @@ export function MediaBrowser({ folder, entries, status, total, onClose }: MediaB
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <span className="text-[10px] uppercase text-neutral-600">{entry.kind}</span>
+                  <span className="text-[10px] uppercase text-neutral-600">{KIND_LABEL[entry.kind]}</span>
                 )}
               </div>
               <div className="flex flex-col gap-0.5 px-2 pb-2">
@@ -95,7 +102,7 @@ export function MediaBrowser({ folder, entries, status, total, onClose }: MediaB
       </div>
 
       {entries.length === 0 && status === "complete" && (
-        <p className="text-sm text-neutral-500">No files found.</p>
+        <p className="text-sm text-neutral-500">Không tìm thấy tệp nào.</p>
       )}
     </section>
   );

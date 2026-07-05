@@ -48,7 +48,7 @@ export function AddTransfersBar({
       <button
         type="button"
         onClick={onClear}
-        title="Clear all Sources and Destinations"
+        title="Xóa hết Nguồn và Đích"
         className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200"
       >
         ✕
@@ -58,7 +58,7 @@ export function AddTransfersBar({
         {mode === "cascade" && (
           <span
             className="hidden max-w-xs truncate text-[10px] text-neutral-500 sm:block"
-            title="Drag rows in the Destinations list to reorder this chain"
+            title="Kéo các dòng trong danh sách Đích để sắp lại thứ tự chuỗi này"
           >
             {destinations.map((d) => endpointLabel(d, disks)).join(" → ")}
           </span>
@@ -68,7 +68,7 @@ export function AddTransfersBar({
           onClick={() => onAdd(mode, moveAfterTransfer && moveEligible)}
           className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
         >
-          Add {count} Transfer{count === 1 ? "" : "s"}
+          Thêm {count} lượt truyền
         </button>
       </div>
 
@@ -77,26 +77,26 @@ export function AddTransfersBar({
           <button
             type="button"
             onClick={() => setMode("parallel")}
-            title="Each destination copies from its source independently"
+            title="Mỗi đích sao chép độc lập từ nguồn của nó"
             className={`px-2 py-1 ${mode === "parallel" ? "bg-neutral-700 text-neutral-100" : "text-neutral-400"}`}
           >
-            Parallel
+            Song song
           </button>
           <button
             type="button"
             onClick={() => setMode("cascade")}
-            title="Source copies to the first destination, then relays to the rest"
+            title="Nguồn sao chép vào đích đầu tiên, sau đó chuyển tiếp đến các đích còn lại"
             className={`px-2 py-1 ${mode === "cascade" ? "bg-neutral-700 text-neutral-100" : "text-neutral-400"}`}
           >
-            Cascade
+            Nối tiếp
           </button>
         </div>
         <label
           className={`flex items-center gap-1 ${moveEligible ? "" : "opacity-40"}`}
           title={
             moveEligible
-              ? "Delete each source once its copy is confirmed safe"
-              : "Only available with exactly one Destination and Source/Source & Destination verification"
+              ? "Xóa từng nguồn sau khi bản sao được xác nhận an toàn"
+              : "Chỉ khả dụng khi có đúng 1 Đích và chế độ xác minh là Nguồn/Nguồn & Đích"
           }
         >
           <input
@@ -105,7 +105,7 @@ export function AddTransfersBar({
             disabled={!moveEligible}
             onChange={(e) => setMoveAfterTransfer(e.currentTarget.checked)}
           />
-          Move
+          Di chuyển
         </label>
       </div>
     </div>

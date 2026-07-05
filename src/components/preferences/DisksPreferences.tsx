@@ -10,11 +10,11 @@ export function DisksPreferences() {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Hidden drives
+        Ổ đĩa đã ẩn
       </h3>
       {hiddenDisks.length === 0 ? (
         <p className="text-xs text-neutral-500">
-          No hidden drives. Use "Hide" on a drive in the Disks view to hide it from the list.
+          Không có ổ đĩa nào bị ẩn. Dùng "Ẩn" trên một ổ đĩa ở màn Ổ đĩa để ẩn nó khỏi danh sách.
         </p>
       ) : (
         <ul className="flex flex-col gap-1">
@@ -31,7 +31,7 @@ export function DisksPreferences() {
                 onClick={() => unhideDisk(disk.id)}
                 className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
               >
-                Unhide
+                Bỏ ẩn
               </button>
             </li>
           ))}

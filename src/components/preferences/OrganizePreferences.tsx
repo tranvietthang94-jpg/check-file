@@ -9,15 +9,19 @@ import type { SelectiveCopyMode } from "../../types/organize";
 
 const DATE_SUB_TOKENS = ["YYYY", "YY", "MM", "DD", "hh", "mm", "ss"];
 
+// Token *names* (the part inside `{...}`) are functional identifiers parsed
+// by both this preview and src-tauri/src/organize.rs's real renderer --
+// left in English so a saved template's tokens keep working. Only `group`
+// (the palette's section headers) is pure display text, safe to localize.
 const BUILTIN_TOKENS: TemplateToken[] = [
-  { name: "Source Name", group: "General" },
-  { name: "Counter", group: "General" },
-  { name: "Filename", group: "General" },
-  { name: "File Counter", group: "General" },
-  { name: "File Extension", group: "General" },
-  ...DATE_SUB_TOKENS.map((t) => ({ name: t, group: "Shoot Date" })),
-  ...DATE_SUB_TOKENS.map((t) => ({ name: `File ${t}`, group: "File Date" })),
-  ...DATE_SUB_TOKENS.map((t) => ({ name: `Content ${t}`, group: "Content Date" })),
+  { name: "Source Name", group: "Chung" },
+  { name: "Counter", group: "Chung" },
+  { name: "Filename", group: "Chung" },
+  { name: "File Counter", group: "Chung" },
+  { name: "File Extension", group: "Chung" },
+  ...DATE_SUB_TOKENS.map((t) => ({ name: t, group: "Ngày quay" })),
+  ...DATE_SUB_TOKENS.map((t) => ({ name: `File ${t}`, group: "Ngày tệp" })),
+  ...DATE_SUB_TOKENS.map((t) => ({ name: `Content ${t}`, group: "Ngày nội dung" })),
 ];
 
 const NOW = new Date();
@@ -121,12 +125,12 @@ function PresetsSection() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Presets</h3>
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Mẫu cấu hình</h3>
 
-      {loading && <p className="text-xs text-neutral-500">Loading…</p>}
+      {loading && <p className="text-xs text-neutral-500">Đang tải…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
       {!loading && presets.length === 0 && (
-        <p className="text-xs text-neutral-500">No presets saved yet.</p>
+        <p className="text-xs text-neutral-500">Chưa lưu mẫu cấu hình nào.</p>
       )}
 
       <ul className="flex flex-col gap-1">
@@ -145,7 +149,7 @@ function PresetsSection() {
                 onClick={() => handleLoad(preset.name)}
                 className="rounded border border-neutral-700 px-2 py-1 disabled:opacity-40"
               >
-                Load
+                Tải
               </button>
               <button
                 type="button"
@@ -153,7 +157,7 @@ function PresetsSection() {
                 onClick={() => handleDelete(preset.name)}
                 className="rounded border border-neutral-700 px-2 py-1 text-red-400 disabled:opacity-40"
               >
-                Delete
+                Xóa
               </button>
             </span>
           </li>
@@ -164,7 +168,7 @@ function PresetsSection() {
         <input
           value={newName}
           onChange={(e) => setNewName(e.currentTarget.value)}
-          placeholder="Preset name…"
+          placeholder="Tên mẫu cấu hình…"
           autoComplete="off"
           className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
         />
@@ -174,7 +178,7 @@ function PresetsSection() {
           onClick={handleSave}
           className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
         >
-          Save current
+          Lưu cấu hình hiện tại
         </button>
       </div>
     </section>
@@ -279,7 +283,7 @@ export function OrganizePreferences() {
     ...BUILTIN_TOKENS,
     ...elements
       .filter((e) => e.name.trim() !== "")
-      .map((e) => ({ name: e.name.trim(), group: "Elements" })),
+      .map((e) => ({ name: e.name.trim(), group: "Thành phần" })),
   ];
 
   return (
@@ -288,31 +292,31 @@ export function OrganizePreferences() {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Organize
+          Tổ chức
         </h3>
 
         <div className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            Rename template
+            Mẫu đổi tên
           </span>
           <TemplateBuilder
             value={renameTemplate ?? ""}
             onChange={setRenameTemplate}
             tokens={allTokens}
-            placeholder="Keep original filename…"
+            placeholder="Giữ nguyên tên tệp gốc…"
           />
         </div>
 
         <div className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            Folder template
+            Mẫu thư mục
           </span>
           <TemplateBuilder
             value={folderTemplate ?? ""}
             onChange={setFolderTemplate}
             tokens={allTokens}
             disabled={flatten}
-            placeholder="Keep original folder structure…"
+            placeholder="Giữ nguyên cấu trúc thư mục gốc…"
           />
         </div>
 
@@ -320,12 +324,12 @@ export function OrganizePreferences() {
           className="truncate rounded border border-neutral-800 bg-neutral-900 px-2 py-1 font-mono text-[10px] text-neutral-400"
           title={preview}
         >
-          Preview: {preview}
+          Xem trước: {preview}
         </p>
 
         <label className="flex items-center gap-2 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            {"{Counter}"} padding
+            Số chữ số {"{Counter}"}
           </span>
           <input
             type="number"
@@ -339,7 +343,7 @@ export function OrganizePreferences() {
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            Selective copy
+            Sao chép có chọn lọc
           </span>
           <div className="flex gap-3 text-xs">
             {(["exclude", "include"] as SelectiveCopyMode[]).map((m) => (
@@ -350,7 +354,7 @@ export function OrganizePreferences() {
                   checked={selectiveCopy.mode === m}
                   onChange={() => setSelectiveCopyMode(m)}
                 />
-                {m === "exclude" ? "Do not copy" : "Copy only"}
+                {m === "exclude" ? "Không sao chép" : "Chỉ sao chép"}
               </label>
             ))}
           </div>
@@ -375,11 +379,11 @@ export function OrganizePreferences() {
           />
           <span>
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Skip Modification Date Check
+              Bỏ qua kiểm tra ngày sửa đổi
             </span>
             <span className="block text-neutral-500">
-              Duplicate Detection compares name + size only -- for workflows where a file's
-              modified time can't be trusted to still match.
+              Phát hiện trùng lặp chỉ so khớp tên + kích thước -- dùng cho quy trình mà thời gian sửa
+              đổi của tệp không đáng tin cậy.
             </span>
           </span>
         </label>
@@ -393,11 +397,11 @@ export function OrganizePreferences() {
           />
           <span>
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Auto-Continue on Broken Media
+              Tự động tiếp tục khi Media hỏng
             </span>
             <span className="block text-neutral-500">
-              Skips the alert when a 0-byte file is found on the source and copies anyway. Off by
-              default, so a dropped card gets flagged before anything is copied.
+              Bỏ qua cảnh báo khi phát hiện tệp 0 byte ở nguồn và vẫn sao chép. Mặc định tắt, để thẻ
+              nhớ bị lỗi được cảnh báo trước khi sao chép bất kỳ thứ gì.
             </span>
           </span>
         </label>
@@ -413,7 +417,7 @@ export function OrganizePreferences() {
               }}
             />
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Ignore bundle folder
+              Bỏ qua thư mục gói (bundle)
             </span>
           </label>
           {bundleEnabled && (
@@ -424,7 +428,7 @@ export function OrganizePreferences() {
                   setBundleName(e.currentTarget.value);
                   commitBundle(bundleEnabled, e.currentTarget.value, bundleMaxMb);
                 }}
-                placeholder="Folder name (e.g. PRIVATE)"
+                placeholder="Tên thư mục (vd: PRIVATE)"
                 autoComplete="off"
                 className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
               />
@@ -438,7 +442,7 @@ export function OrganizePreferences() {
                 }}
                 className="w-16 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
               />
-              <span className="self-center text-[10px] text-neutral-500">MB max</span>
+              <span className="self-center text-[10px] text-neutral-500">MB tối đa</span>
             </div>
           )}
         </div>
@@ -449,7 +453,7 @@ export function OrganizePreferences() {
             checked={flatten}
             onChange={(e) => setFlatten(e.currentTarget.checked)}
           />
-          Flatten (discard original subfolders)
+          Làm phẳng (bỏ thư mục con gốc)
         </label>
 
         <label className="flex items-center gap-2 text-xs">
@@ -459,12 +463,12 @@ export function OrganizePreferences() {
             onChange={(e) => setIgnoreEmptyFolders(e.currentTarget.checked)}
             disabled={flatten}
           />
-          <span className={flatten ? "opacity-40" : undefined}>Ignore empty folders</span>
+          <span className={flatten ? "opacity-40" : undefined}>Bỏ qua thư mục rỗng</span>
         </label>
 
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            {"{Content *}"} excludes extensions
+            {"{Content *}"} loại trừ đuôi tệp
           </span>
           <input
             value={excludedExtText}
@@ -480,7 +484,7 @@ export function OrganizePreferences() {
 
         <div className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            Elements (custom tokens)
+            Thành phần (token tùy chỉnh)
           </span>
 
           {elements.map((element) => (
@@ -494,7 +498,7 @@ export function OrganizePreferences() {
               <button
                 type="button"
                 onClick={() => removeElement(element.name)}
-                title={`Remove {${element.name}}`}
+                title={`Xóa {${element.name}}`}
                 className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
               >
                 ×
@@ -509,7 +513,7 @@ export function OrganizePreferences() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitNewElement();
               }}
-              placeholder="New element name (e.g. Location)…"
+              placeholder="Tên thành phần mới (vd: Location)…"
               autoComplete="off"
               className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
             />
@@ -518,12 +522,12 @@ export function OrganizePreferences() {
               onClick={commitNewElement}
               className="rounded border border-neutral-700 px-2 py-1 text-xs hover:bg-neutral-800"
             >
-              + Add
+              + Thêm
             </button>
           </div>
           <p className="text-[10px] leading-relaxed text-neutral-600">
-            Type the token (e.g. {"{Location}"}) into a Rename or Folder template above to use it.
-            Its per-job value is entered in the Elements panel on the Disks view, not here.
+            Gõ token (vd {"{Location}"}) vào Mẫu đổi tên hoặc Mẫu thư mục ở trên để dùng nó. Giá trị
+            theo từng lượt truyền được nhập ở bảng Thành phần trên màn Ổ đĩa, không phải ở đây.
           </p>
         </div>
 
@@ -538,7 +542,7 @@ export function OrganizePreferences() {
               }}
             />
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-              Auto Label new sources
+              Tự động gắn nhãn nguồn mới
             </span>
           </label>
 
@@ -558,12 +562,12 @@ export function OrganizePreferences() {
                 className="truncate rounded border border-neutral-800 bg-neutral-900 px-2 py-1 font-mono text-[10px] text-neutral-400"
                 title={autoLabelPreview}
               >
-                Preview: {autoLabelPreview}
+                Xem trước: {autoLabelPreview}
               </p>
               <div className="flex items-center gap-3 text-xs">
                 <label className="flex items-center gap-2">
                   <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-                    Start at
+                    Bắt đầu từ
                   </span>
                   <input
                     type="number"
@@ -578,7 +582,7 @@ export function OrganizePreferences() {
                 </label>
                 <label className="flex items-center gap-2">
                   <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-                    Padding
+                    Số chữ số
                   </span>
                   <input
                     type="number"

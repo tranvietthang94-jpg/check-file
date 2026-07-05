@@ -146,23 +146,23 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     const cascadeFromCandidates = destinations.filter((d) => d.diskId !== disk.id);
 
     const items: DiskContextMenuItem[] = [
-      { label: "Add Label…", onSelect: () => startEditingLabel(disk) },
+      { label: "Thêm nhãn…", onSelect: () => startEditingLabel(disk) },
       {
-        label: "Source Folder",
-        children: [{ label: "Choose Folder…", onSelect: () => chooseSourceFolder(disk) }],
+        label: "Thư mục Nguồn",
+        children: [{ label: "Chọn thư mục…", onSelect: () => chooseSourceFolder(disk) }],
       },
       {
-        label: "Destination Folder",
-        children: [{ label: "Choose Folder…", onSelect: () => chooseDestinationFolder(disk) }],
+        label: "Thư mục Đích",
+        children: [{ label: "Chọn thư mục…", onSelect: () => chooseDestinationFolder(disk) }],
       },
-      { label: "Set as Source", onSelect: () => addSource(disk.id), disabled: isSource },
+      { label: "Đặt làm Nguồn", onSelect: () => addSource(disk.id), disabled: isSource },
       {
-        label: "Set as Destination",
+        label: "Đặt làm Đích",
         onSelect: () => addDestination(disk.id),
         disabled: isDestination,
       },
       {
-        label: "Cascade from",
+        label: "Nối tiếp từ",
         disabled: cascadeFromCandidates.length === 0,
         children: cascadeFromCandidates.map((d) => ({
           label: d.label || disks.find((disk2) => disk2.id === d.diskId)?.name || d.diskId,
@@ -170,37 +170,37 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
         })),
       },
       {
-        label: "Verification",
+        label: "Xác minh",
         children: [
           {
-            label: `Verify ${diskLabel}…`,
+            label: `Xác minh ${diskLabel}…`,
             onSelect: () => {
               runVerify(disk.mountPoint, "folder");
               onVerifyRequested?.();
             },
           },
-          { label: "Verify Folder…", onSelect: () => verifyOtherFolder() },
+          { label: "Xác minh thư mục…", onSelect: () => verifyOtherFolder() },
         ],
       },
     ];
     if (disk.isRemovable) {
       items.push({
-        label: ejecting[disk.id] ? "Ejecting…" : "Eject",
+        label: ejecting[disk.id] ? "Đang tháo…" : "Tháo",
         onSelect: () => handleEject(disk),
         disabled: busy || ejecting[disk.id],
       });
     }
     items.push({
-      label: `Rename ${disk.name}`,
+      label: `Đổi tên ${disk.name}`,
       onSelect: () => startRenamingVolume(disk),
     });
     items.push({
-      label: "Hide",
+      label: "Ẩn",
       onSelect: () => hideDisk(disk.id),
       disabled: assigned,
     });
     items.push({
-      label: "Open in Explorer",
+      label: "Mở trong Explorer",
       onSelect: () => revealItemInDir(disk.mountPoint).catch(console.error),
     });
     return items;
@@ -209,14 +209,14 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Disks
+        Ổ đĩa
       </h2>
       {disks.length === 0 && (
-        <p className="text-sm text-neutral-500">No volumes detected.</p>
+        <p className="text-sm text-neutral-500">Không phát hiện ổ đĩa nào.</p>
       )}
       {disks.length > 0 && visibleDisks.length === 0 && (
         <p className="text-sm text-neutral-500">
-          Every detected drive is hidden -- unhide one in Preferences → Disks.
+          Mọi ổ đĩa phát hiện được đều đang bị ẩn -- bỏ ẩn ở Cài đặt → Ổ đĩa.
         </p>
       )}
       <ul className="flex flex-col gap-2">
@@ -237,7 +237,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                 e.preventDefault();
                 setContextMenu({ x: e.clientX, y: e.clientY, diskId: disk.id });
               }}
-              title="Drag onto Sources/Destinations, or right-click for more actions"
+              title="Kéo vào Nguồn/Đích, hoặc chuột phải để xem thêm thao tác"
               className="flex cursor-grab flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 active:cursor-grabbing"
             >
               <div className="flex items-center gap-2">
@@ -255,14 +255,14 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                         if (e.key === "Enter") commitLabelEdit(disk.id);
                         if (e.key === "Escape") setEditingLabelDiskId(null);
                       }}
-                      placeholder="Label…"
+                      placeholder="Nhãn…"
                       autoComplete="off"
                       className="w-32 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-sm font-medium"
                     />
                   ) : (
                     <button
                       type="button"
-                      title="Click to add/edit a label -- sets this disk as a Source"
+                      title="Bấm để thêm/sửa nhãn -- đặt ổ đĩa này làm Nguồn"
                       onClick={(e) => {
                         e.stopPropagation();
                         startEditingLabel(disk);
@@ -273,9 +273,9 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                     </button>
                   )}
                   <span className="text-xs text-neutral-500">
-                    {disk.mountPoint} · {formatBytes(disk.availableBytes)} free of{" "}
+                    {disk.mountPoint} · còn trống {formatBytes(disk.availableBytes)} /{" "}
                     {formatBytes(disk.totalBytes)}
-                    {disk.isRemovable ? " · removable" : ""}
+                    {disk.isRemovable ? " · di động" : ""}
                   </span>
                   {renamingDiskId === disk.id && (
                     <input
@@ -289,7 +289,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                         if (e.key === "Enter") commitRename(disk);
                         if (e.key === "Escape") setRenamingDiskId(null);
                       }}
-                      title="Rename the actual disk volume (not the app-only Label)"
+                      title="Đổi tên volume thật của ổ đĩa (khác với Nhãn chỉ dùng trong app)"
                       autoComplete="off"
                       className="mt-1 w-32 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-xs"
                     />
@@ -306,7 +306,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                   onClick={() => addSource(disk.id)}
                   className="rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
                 >
-                  + Source
+                  + Nguồn
                 </button>
                 <button
                   type="button"
@@ -314,17 +314,17 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                   onClick={() => addDestination(disk.id)}
                   className="rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
                 >
-                  + Destination
+                  + Đích
                 </button>
                 {disk.isRemovable && (
                   <button
                     type="button"
                     disabled={busy || ejecting[disk.id]}
-                    title={busy ? "Wait for active transfers on this disk to finish" : undefined}
+                    title={busy ? "Đợi các lượt truyền đang chạy trên ổ đĩa này xong đã" : undefined}
                     onClick={() => handleEject(disk)}
                     className="rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
                   >
-                    {ejecting[disk.id] ? "Ejecting…" : "Eject"}
+                    {ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
                   </button>
                 )}
                 <button
@@ -332,13 +332,13 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                   disabled={assigned}
                   title={
                     assigned
-                      ? "Remove it as a Source/Destination first"
-                      : "Hide this drive from the list"
+                      ? "Gỡ khỏi Nguồn/Đích trước đã"
+                      : "Ẩn ổ đĩa này khỏi danh sách"
                   }
                   onClick={() => hideDisk(disk.id)}
                   className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 disabled:opacity-40"
                 >
-                  Hide
+                  Ẩn
                 </button>
               </div>
               {ejectError[disk.id] && (

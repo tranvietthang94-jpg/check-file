@@ -27,15 +27,15 @@ export function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-/** "About 5 seconds" / "About 2 minutes" -- matches OffShoot's job-row ETA phrasing. */
+/** "Khoảng 5 giây" / "Khoảng 2 phút" -- matches OffShoot's job-row ETA phrasing. */
 export function formatEta(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "";
   const s = Math.round(seconds);
-  if (s < 60) return `About ${s} second${s === 1 ? "" : "s"}`;
+  if (s < 60) return `Khoảng ${s} giây`;
   const m = Math.round(s / 60);
-  if (m < 60) return `About ${m} minute${m === 1 ? "" : "s"}`;
+  if (m < 60) return `Khoảng ${m} phút`;
   const h = Math.round(m / 60);
-  return `About ${h} hour${h === 1 ? "" : "s"}`;
+  return `Khoảng ${h} giờ`;
 }
 
 export function formatFrameRate(fps: number): string {

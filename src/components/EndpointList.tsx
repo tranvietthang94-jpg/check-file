@@ -90,7 +90,7 @@ export function EndpointList({
       </h2>
       {endpoints.length === 0 && (
         <p className="text-sm text-neutral-500">
-          {onDropDisk ? "None assigned yet -- drag a disk here, or use + Source/Destination." : "None assigned yet."}
+          {onDropDisk ? "Chưa gán -- kéo một ổ đĩa vào đây, hoặc dùng nút + Nguồn/Đích." : "Chưa gán."}
         </p>
       )}
       <ul className="flex flex-col gap-2">
@@ -121,7 +121,7 @@ export function EndpointList({
                 setReorderOverId(null);
                 onReorder(fromDiskId, endpoint.diskId);
               }}
-              title={onReorder ? "Drag to reorder -- this order is the Cascade hop order" : undefined}
+              title={onReorder ? "Kéo để sắp thứ tự -- thứ tự này là thứ tự chuyển tiếp Nối tiếp (Cascade)" : undefined}
               className={`flex flex-col gap-2 rounded border px-3 py-2 ${
                 reorderOverId === endpoint.diskId
                   ? "border-blue-500 bg-blue-500/10"
@@ -140,7 +140,7 @@ export function EndpointList({
                     <button
                       type="button"
                       disabled={ejecting[disk.id]}
-                      title={ejecting[disk.id] ? "Ejecting…" : "Eject"}
+                      title={ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
                       onClick={() => handleEject(disk)}
                       className="absolute -right-1.5 -top-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-green-500 text-[6px] text-neutral-950 disabled:opacity-40"
                     >
@@ -151,13 +151,13 @@ export function EndpointList({
                 <div className="flex flex-col">
                   <span className="font-medium">{disk?.name ?? endpoint.diskId}</span>
                   <span className="text-xs text-neutral-500">
-                    {disk?.mountPoint ?? "(unplugged)"}
+                    {disk?.mountPoint ?? "(đã rút)"}
                   </span>
                   {disk && (
                     <span className="text-[10px] text-neutral-600">
                       {usageKind === "used"
-                        ? `${formatBytes(disk.totalBytes - disk.availableBytes)} in use`
-                        : `${formatBytes(disk.availableBytes)} free`}
+                        ? `${formatBytes(disk.totalBytes - disk.availableBytes)} đang dùng`
+                        : `${formatBytes(disk.availableBytes)} còn trống`}
                     </span>
                   )}
                 </div>
@@ -166,8 +166,8 @@ export function EndpointList({
                 <input
                   value={endpoint.label}
                   onChange={(e) => onLabelChange(endpoint.diskId, e.currentTarget.value)}
-                  placeholder="Label…"
-                  title={endpoint.isAutoLabel ? "Auto-generated label" : "Label"}
+                  placeholder="Nhãn…"
+                  title={endpoint.isAutoLabel ? "Nhãn tự động" : "Nhãn"}
                   autoComplete="off"
                   className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs ${labelPillClass(endpoint)}`}
                 />
@@ -177,7 +177,7 @@ export function EndpointList({
                     onClick={() => onBrowse(endpoint.path)}
                     className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
                   >
-                    Browse
+                    Duyệt
                   </button>
                 )}
                 <button
@@ -185,7 +185,7 @@ export function EndpointList({
                   onClick={() => onRemove(endpoint.diskId)}
                   className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-red-400"
                 >
-                  Remove
+                  Xóa
                 </button>
               </div>
               {ejectError[endpoint.diskId] && (
@@ -193,12 +193,12 @@ export function EndpointList({
               )}
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-                  Folder path
+                  Đường dẫn thư mục
                 </span>
                 <input
                   value={endpoint.path}
                   onChange={(e) => onPathChange(endpoint.diskId, e.currentTarget.value)}
-                  placeholder="Full folder path…"
+                  placeholder="Đường dẫn thư mục đầy đủ…"
                   autoComplete="off"
                   className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
                 />

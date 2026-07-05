@@ -25,7 +25,7 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium">
           {entry.sourceName}
-          {entry.cancelled && <span className="ml-2 text-orange-400">Stopped</span>}
+          {entry.cancelled && <span className="ml-2 text-orange-400">Đã dừng</span>}
         </span>
         <span className="text-neutral-500">{formatTimestamp(entry.finishedAt)}</span>
       </div>
@@ -34,21 +34,21 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-neutral-400">
         <span>
-          {entry.filesCopied} file(s) · {formatBytes(entry.bytesCopied)}
+          {entry.filesCopied} tệp · {formatBytes(entry.bytesCopied)}
         </span>
-        {entry.skippedFiles.length > 0 && <span>{entry.skippedFiles.length} skipped</span>}
-        {entry.renamedFiles.length > 0 && <span>{entry.renamedFiles.length} renamed</span>}
+        {entry.skippedFiles.length > 0 && <span>{entry.skippedFiles.length} đã bỏ qua</span>}
+        {entry.renamedFiles.length > 0 && <span>{entry.renamedFiles.length} đã đổi tên</span>}
         {entry.failedFiles.length > 0 && (
-          <span className="text-red-400">{entry.failedFiles.length} failed</span>
+          <span className="text-red-400">{entry.failedFiles.length} thất bại</span>
         )}
         {entry.deletedSourceFiles.length > 0 && (
           <span title={entry.deletedSourceFiles.join(", ")}>
-            {entry.deletedSourceFiles.length} moved
+            {entry.deletedSourceFiles.length} đã di chuyển
           </span>
         )}
         {entry.moveDeleteFailed.length > 0 && (
           <span className="text-orange-400" title={entry.moveDeleteFailed[0].message}>
-            {entry.moveDeleteFailed.length} move-delete failed
+            {entry.moveDeleteFailed.length} di chuyển-xóa thất bại
           </span>
         )}
         {mhlName && <span title={entry.mhlPath ?? undefined}>MHL: {mhlName}</span>}
@@ -58,7 +58,7 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
         onClick={() => onViewClips(entry.destination)}
         className="mt-1 w-fit rounded border border-neutral-700 px-2 py-1 text-xs"
       >
-        View clips
+        Xem clip
       </button>
     </li>
   );
@@ -78,21 +78,21 @@ export function TransferLogPanel({ onViewClips }: TransferLogPanelProps) {
     <section className="col-span-full flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Transfer Log
+          Nhật ký truyền tải
         </h2>
         <button
           type="button"
           onClick={() => refresh()}
           className="rounded border border-neutral-700 px-2 py-1 text-xs"
         >
-          Refresh
+          Làm mới
         </button>
       </div>
 
-      {loading && <p className="text-xs text-neutral-500">Loading…</p>}
+      {loading && <p className="text-xs text-neutral-500">Đang tải…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
       {!loading && logs.length === 0 && (
-        <p className="text-xs text-neutral-500">No completed transfers yet.</p>
+        <p className="text-xs text-neutral-500">Chưa có lượt truyền nào hoàn tất.</p>
       )}
 
       <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">

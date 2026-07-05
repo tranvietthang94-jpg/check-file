@@ -17,7 +17,7 @@ export function GeneralPreferences() {
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Notifications
+          Thông báo
         </h3>
         <label className="flex items-center gap-2 text-xs">
           <input
@@ -25,7 +25,7 @@ export function GeneralPreferences() {
             checked={desktopNotifications}
             onChange={(e) => setDesktopNotifications(e.currentTarget.checked)}
           />
-          Desktop notifications
+          Thông báo trên desktop
         </label>
         <label className="flex items-center gap-2 text-xs">
           <input
@@ -33,12 +33,12 @@ export function GeneralPreferences() {
             checked={preventSleep}
             onChange={(e) => setPreventSleep(e.currentTarget.checked)}
           />
-          Prevent sleep during transfer
+          Ngăn máy vào chế độ ngủ khi đang truyền
         </label>
       </section>
 
       <section className="flex flex-col gap-1">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Date</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Ngày</h3>
         <div className="flex gap-3 text-xs">
           {(["automatic", "manual"] as DateOverrideMode[]).map((m) => (
             <label key={m} className="flex items-center gap-1">
@@ -48,7 +48,7 @@ export function GeneralPreferences() {
                 checked={dateOverride.mode === m}
                 onChange={() => setDateOverrideMode(m)}
               />
-              {m === "automatic" ? "Follow system clock" : "Set manually"}
+              {m === "automatic" ? "Theo đồng hồ hệ thống" : "Đặt thủ công"}
             </label>
           ))}
         </div>
@@ -60,13 +60,13 @@ export function GeneralPreferences() {
               checked={dateOverride.rolloverAt4am}
               onChange={(e) => setRolloverAt4am(e.currentTarget.checked)}
             />
-            Roll over at 4am (overnight shoots keep yesterday's date)
+            Chuyển ngày lúc 4 giờ sáng (buổi quay đêm vẫn giữ ngày hôm trước)
           </label>
         ) : (
           <div className="flex items-center gap-2">
             <input
               type="date"
-              title="Shoot date"
+              title="Ngày quay"
               value={dateOverride.manualDate ?? ""}
               onChange={(e) => setManualDate(e.currentTarget.value || null)}
               className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
@@ -79,7 +79,7 @@ export function GeneralPreferences() {
               }}
               className="rounded border border-neutral-700 px-2 py-1 text-[10px] uppercase tracking-wide text-neutral-400 hover:bg-neutral-800"
             >
-              Now
+              Bây giờ
             </button>
           </div>
         )}

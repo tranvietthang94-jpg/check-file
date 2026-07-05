@@ -7,10 +7,10 @@ import { TransfersPreferences } from "./preferences/TransfersPreferences";
 type Tab = "general" | "disks" | "organize" | "transfers";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "disks", label: "Disks" },
-  { id: "organize", label: "Organize" },
-  { id: "transfers", label: "Transfers" },
+  { id: "general", label: "Chung" },
+  { id: "disks", label: "Ổ đĩa" },
+  { id: "organize", label: "Tổ chức" },
+  { id: "transfers", label: "Truyền tải" },
 ];
 
 interface PreferencesModalProps {
@@ -34,14 +34,14 @@ export function PreferencesModal({ open, onClose }: PreferencesModalProps) {
       >
         <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-            Preferences
+            Cài đặt
           </h2>
           <button
             type="button"
             onClick={onClose}
             className="rounded border border-neutral-700 px-2 py-1 text-xs"
           >
-            Close
+            Đóng
           </button>
         </div>
 

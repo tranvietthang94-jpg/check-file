@@ -3,12 +3,12 @@ import type { ChecksumAlgorithm, VerificationMode } from "../../types/job";
 import type { QueueMode } from "../../types/queue";
 
 const VERIFICATION_MODES: { value: VerificationMode; label: string; hint: string }[] = [
-  { value: "transfer", label: "Transfer", hint: "Size check only, fastest" },
-  { value: "source", label: "Source", hint: "Hash source while copying" },
+  { value: "transfer", label: "Chỉ Truyền", hint: "Chỉ kiểm tra kích thước, nhanh nhất" },
+  { value: "source", label: "Nguồn", hint: "Băm nguồn trong khi sao chép" },
   {
     value: "sourceAndDestination",
-    label: "Source & Destination",
-    hint: "Hash both, compare (safest)",
+    label: "Nguồn & Đích",
+    hint: "Băm cả hai, so sánh (an toàn nhất)",
   },
 ];
 
@@ -24,18 +24,18 @@ const LEGACY_ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
 ];
 
 const QUEUE_MODES: { value: QueueMode; label: string; hint: string }[] = [
-  { value: "off", label: "Off", hint: "Every transfer starts immediately" },
+  { value: "off", label: "Tắt", hint: "Mọi lượt truyền bắt đầu ngay lập tức" },
   {
     value: "singleSource",
-    label: "Single Source",
-    hint: "One source's destinations at a time; next source auto-starts",
+    label: "Từng Nguồn",
+    hint: "Xử lý các đích của một nguồn tại một thời điểm; nguồn kế tiếp tự động bắt đầu",
   },
   {
     value: "singleDestination",
-    label: "Single Destination",
-    hint: "One destination at a time per source",
+    label: "Từng Đích",
+    hint: "Mỗi nguồn xử lý từng đích một",
   },
-  { value: "singleTransfer", label: "Single Transfer", hint: "One job at a time, app-wide" },
+  { value: "singleTransfer", label: "Từng Lượt truyền", hint: "Một công việc tại một thời điểm, toàn ứng dụng" },
 ];
 
 export function TransfersPreferences() {
@@ -60,7 +60,7 @@ export function TransfersPreferences() {
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Transfer
+          Truyền tải
         </h3>
         <label className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
           <input
@@ -71,10 +71,10 @@ export function TransfersPreferences() {
           />
           <span className="flex flex-col">
             <span className="font-medium">
-              Don't copy but move data when a Source and Destination are on the same volume
+              Di chuyển thay vì sao chép khi Nguồn và Đích cùng ổ đĩa
             </span>
             <span className="text-neutral-500">
-              Relocates the file instantly instead of duplicating it, when possible.
+              Di chuyển tệp ngay lập tức thay vì nhân bản, khi có thể.
             </span>
           </span>
         </label>
@@ -82,7 +82,7 @@ export function TransfersPreferences() {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Verification
+          Xác minh
         </h3>
         <div className="flex flex-col gap-1">
           {VERIFICATION_MODES.map((m) => (
@@ -107,7 +107,7 @@ export function TransfersPreferences() {
 
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-            Checksum algorithm
+            Thuật toán mã băm
           </span>
           <select
             value={checksumAlgorithm}
@@ -130,7 +130,7 @@ export function TransfersPreferences() {
             disabled={verificationMode === "transfer"}
             onChange={(e) => setLegacyChecksumEnabled(e.currentTarget.checked)}
           />
-          <span>Also generate legacy checksums:</span>
+          <span>Tạo thêm mã băm cũ:</span>
           <select
             value={legacyChecksumAlgorithm}
             onChange={(e) => setLegacyChecksumAlgorithm(e.currentTarget.value as ChecksumAlgorithm)}
@@ -148,7 +148,7 @@ export function TransfersPreferences() {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Queuing
+          Hàng đợi
         </h3>
         <div className="flex flex-col gap-1">
           {QUEUE_MODES.map((m) => (
@@ -174,7 +174,7 @@ export function TransfersPreferences() {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Paper Trail
+          Hồ sơ lưu trữ
         </h3>
         <label className="flex cursor-pointer items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
           <input
@@ -184,9 +184,9 @@ export function TransfersPreferences() {
             className="mt-0.5"
           />
           <span className="flex flex-col">
-            <span className="font-medium">Include Transfer Logs on Destination</span>
+            <span className="font-medium">Lưu thêm Nhật ký truyền tải ở Đích</span>
             <span className="text-neutral-500">
-              Transfer Logs are always saved locally as well.
+              Nhật ký truyền tải luôn được lưu cục bộ.
             </span>
           </span>
         </label>
@@ -198,9 +198,9 @@ export function TransfersPreferences() {
             className="mt-0.5"
           />
           <span className="flex flex-col">
-            <span className="font-medium">Also create an MHL for each file</span>
+            <span className="font-medium">Tạo thêm MHL riêng cho từng tệp</span>
             <span className="text-neutral-500">
-              One sidecar MHL next to each file, alongside the combined one.
+              Một MHL đi kèm mỗi tệp, bên cạnh MHL gộp chung.
             </span>
           </span>
         </label>

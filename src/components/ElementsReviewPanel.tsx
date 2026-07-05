@@ -28,13 +28,13 @@ export function ElementsReviewPanel() {
     >
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-          Elements
+          Thành phần
         </span>
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
-          title={collapsed ? "Expand" : "Collapse"}
-          aria-label={collapsed ? "Expand Elements panel" : "Collapse Elements panel"}
+          title={collapsed ? "Mở rộng" : "Thu gọn"}
+          aria-label={collapsed ? "Mở rộng bảng Thành phần" : "Thu gọn bảng Thành phần"}
           className="flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200"
         >
           {collapsed ? "⌃" : "⌄"}
@@ -54,7 +54,7 @@ export function ElementsReviewPanel() {
               <input
                 value={element.value}
                 onChange={(e) => setElementValue(element.name, e.currentTarget.value)}
-                placeholder="Value…"
+                placeholder="Giá trị…"
                 autoComplete="off"
                 className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
               />
@@ -67,7 +67,7 @@ export function ElementsReviewPanel() {
         <DiskContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={[{ label: "Clear", onSelect: clearElementValues }]}
+          items={[{ label: "Xóa hết", onSelect: clearElementValues }]}
           onClose={() => setContextMenu(null)}
         />
       )}
