@@ -24,6 +24,7 @@ import { useMediaStore } from "./state/mediaStore";
 import { useOrganizeStore } from "./state/organizeStore";
 import { useTransferLogStore } from "./state/transferLogStore";
 import { DisksPanel } from "./components/DisksPanel";
+import { ElementsReviewPanel } from "./components/ElementsReviewPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
 import { GroupComposer } from "./components/GroupComposer";
@@ -391,6 +392,7 @@ function App() {
             disks={disks}
             onStart={handleStartGroup}
           />
+          <ElementsReviewPanel />
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
