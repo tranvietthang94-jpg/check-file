@@ -34,6 +34,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const destinations = useDisksStore((s) => s.destinations);
   const addSource = useDisksStore((s) => s.addSource);
   const addDestination = useDisksStore((s) => s.addDestination);
+  const insertDestinationAfter = useDisksStore((s) => s.insertDestinationAfter);
   const setSourceLabel = useDisksStore((s) => s.setSourceLabel);
   const setSourcePath = useDisksStore((s) => s.setSourcePath);
   const setDestinationPath = useDisksStore((s) => s.setDestinationPath);
@@ -138,6 +139,11 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     const assigned = isSource || isDestination;
     const busy = isDiskBusy(disk, Object.values(jobs));
     const diskLabel = sources.find((s) => s.diskId === disk.id)?.label || disk.name;
+    // Every *other* current Destination -- picking one wires this disk in
+    // right after it in the chain (Cascade mode reads the Destinations
+    // list's order as its hop order), without first having to "+
+    // Destination" it and then drag it into place by hand.
+    const cascadeFromCandidates = destinations.filter((d) => d.diskId !== disk.id);
 
     const items: DiskContextMenuItem[] = [
       { label: "Add Label…", onSelect: () => startEditingLabel(disk) },
@@ -154,6 +160,14 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
         label: "Set as Destination",
         onSelect: () => addDestination(disk.id),
         disabled: isDestination,
+      },
+      {
+        label: "Cascade from",
+        disabled: cascadeFromCandidates.length === 0,
+        children: cascadeFromCandidates.map((d) => ({
+          label: d.label || disks.find((disk2) => disk2.id === d.diskId)?.name || d.diskId,
+          onSelect: () => insertDestinationAfter(disk.id, d.diskId),
+        })),
       },
       {
         label: "Verification",

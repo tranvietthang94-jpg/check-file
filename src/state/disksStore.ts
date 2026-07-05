@@ -34,6 +34,12 @@ interface DisksState {
    * straight from the live Destinations list instead of a per-click
    * composer form. */
   reorderDestinations: (fromDiskId: string, toDiskId: string) => void;
+  /** The disk context menu's "Cascade from ▶ [existing destination]" --
+   * adds `diskId` as a Destination (if it isn't already one) positioned
+   * right after `afterDiskId` in the list, i.e. it now receives from that
+   * hop instead of landing wherever `addDestination` would otherwise
+   * append it. */
+  insertDestinationAfter: (diskId: string, afterDiskId: string) => void;
 }
 
 export const useDisksStore = create<DisksState>((set, get) => ({
@@ -136,6 +142,23 @@ export const useDisksStore = create<DisksState>((set, get) => ({
       const next = [...state.destinations];
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
+      return { destinations: next };
+    }),
+
+  insertDestinationAfter: (diskId, afterDiskId) =>
+    set((state) => {
+      const disk = get().disks.find((d) => d.id === diskId);
+      const existing = state.destinations.find((d) => d.diskId === diskId);
+      const entry: Endpoint = existing ?? {
+        diskId,
+        label: "",
+        path: disk?.mountPoint ?? "",
+        isAutoLabel: false,
+      };
+      const withoutMoved = state.destinations.filter((d) => d.diskId !== diskId);
+      const afterIndex = withoutMoved.findIndex((d) => d.diskId === afterDiskId);
+      const next = [...withoutMoved];
+      next.splice(afterIndex === -1 ? next.length : afterIndex + 1, 0, entry);
       return { destinations: next };
     }),
 
