@@ -9,6 +9,23 @@ import { formatBytes } from "../lib/format";
 import { DISK_DRAG_MIME } from "../lib/dragTypes";
 import { DriveIcon } from "./icons/DriveIcon";
 import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
+import { Button } from "./ui/Button";
+import { Panel } from "./ui/Panel";
+import { SectionHeading } from "./ui/SectionHeading";
+import { EmptyState } from "./ui/EmptyState";
+import {
+  ArrowRightLeft,
+  ArrowUpFromLine,
+  EyeOff,
+  ExternalLink,
+  FolderInput,
+  FolderOutput,
+  HardDrive,
+  Pencil,
+  Plus,
+  ShieldCheck,
+  Tag,
+} from "./icons";
 import type { DiskInfo } from "../types/disk";
 import type { TransferJob } from "../types/job";
 
@@ -145,24 +162,38 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     // Destination" it and then drag it into place by hand.
     const cascadeFromCandidates = destinations.filter((d) => d.diskId !== disk.id);
 
+    const iconClass = "h-3.5 w-3.5";
     const items: DiskContextMenuItem[] = [
-      { label: "Thêm nhãn…", onSelect: () => startEditingLabel(disk) },
+      {
+        label: "Thêm nhãn…",
+        icon: <Tag className={iconClass} />,
+        onSelect: () => startEditingLabel(disk),
+      },
       {
         label: "Thư mục Nguồn",
+        icon: <FolderInput className={iconClass} />,
         children: [{ label: "Chọn thư mục…", onSelect: () => chooseSourceFolder(disk) }],
       },
       {
         label: "Thư mục Đích",
+        icon: <FolderOutput className={iconClass} />,
         children: [{ label: "Chọn thư mục…", onSelect: () => chooseDestinationFolder(disk) }],
       },
-      { label: "Đặt làm Nguồn", onSelect: () => addSource(disk.id), disabled: isSource },
+      {
+        label: "Đặt làm Nguồn",
+        icon: <Plus className={iconClass} />,
+        onSelect: () => addSource(disk.id),
+        disabled: isSource,
+      },
       {
         label: "Đặt làm Đích",
+        icon: <Plus className={iconClass} />,
         onSelect: () => addDestination(disk.id),
         disabled: isDestination,
       },
       {
         label: "Nối tiếp từ",
+        icon: <ArrowRightLeft className={iconClass} />,
         disabled: cascadeFromCandidates.length === 0,
         children: cascadeFromCandidates.map((d) => ({
           label: d.label || disks.find((disk2) => disk2.id === d.diskId)?.name || d.diskId,
@@ -171,6 +202,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
       },
       {
         label: "Xác minh",
+        icon: <ShieldCheck className={iconClass} />,
         children: [
           {
             label: `Xác minh ${diskLabel}…`,
@@ -186,38 +218,40 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     if (disk.isRemovable) {
       items.push({
         label: ejecting[disk.id] ? "Đang tháo…" : "Tháo",
+        icon: <ArrowUpFromLine className={iconClass} />,
         onSelect: () => handleEject(disk),
         disabled: busy || ejecting[disk.id],
       });
     }
     items.push({
       label: `Đổi tên ${disk.name}`,
+      icon: <Pencil className={iconClass} />,
       onSelect: () => startRenamingVolume(disk),
     });
     items.push({
       label: "Ẩn",
+      icon: <EyeOff className={iconClass} />,
       onSelect: () => hideDisk(disk.id),
       disabled: assigned,
     });
     items.push({
       label: "Mở trong Explorer",
+      icon: <ExternalLink className={iconClass} />,
       onSelect: () => revealItemInDir(disk.mountPoint).catch(console.error),
     });
     return items;
   }
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Ổ đĩa
-      </h2>
+    <Panel as="section" className="flex flex-col gap-2 p-3">
+      <SectionHeading>Ổ đĩa</SectionHeading>
       {disks.length === 0 && (
-        <p className="text-sm text-neutral-500">Không phát hiện ổ đĩa nào.</p>
+        <EmptyState icon={<HardDrive className="h-5 w-5" />}>Không phát hiện ổ đĩa nào.</EmptyState>
       )}
       {disks.length > 0 && visibleDisks.length === 0 && (
-        <p className="text-sm text-neutral-500">
+        <EmptyState icon={<EyeOff className="h-5 w-5" />}>
           Mọi ổ đĩa phát hiện được đều đang bị ẩn -- bỏ ẩn ở Cài đặt → Ổ đĩa.
-        </p>
+        </EmptyState>
       )}
       <ul className="flex flex-col gap-2">
         {visibleDisks.map((disk) => {
@@ -226,7 +260,8 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
           const assigned = isSource || isDestination;
           const busy = isDiskBusy(disk, Object.values(jobs));
           return (
-            <li
+            <Panel
+              as="li"
               key={disk.id}
               draggable
               onDragStart={(e) => {
@@ -238,7 +273,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                 setContextMenu({ x: e.clientX, y: e.clientY, diskId: disk.id });
               }}
               title="Kéo vào Nguồn/Đích, hoặc chuột phải để xem thêm thao tác"
-              className="flex cursor-grab flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 active:cursor-grabbing"
+              className="flex cursor-grab flex-col gap-2 px-3 py-2 active:cursor-grabbing"
             >
               <div className="flex items-center gap-2">
                 <DriveIcon removable={disk.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
@@ -300,35 +335,36 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  icon={<Plus className="h-3.5 w-3.5" />}
                   disabled={isSource}
                   onClick={() => addSource(disk.id)}
-                  className="rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
                 >
-                  + Nguồn
-                </button>
-                <button
-                  type="button"
+                  Nguồn
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<Plus className="h-3.5 w-3.5" />}
                   disabled={isDestination}
                   onClick={() => addDestination(disk.id)}
-                  className="rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
                 >
-                  + Đích
-                </button>
+                  Đích
+                </Button>
                 {disk.isRemovable && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
                     disabled={busy || ejecting[disk.id]}
                     title={busy ? "Đợi các lượt truyền đang chạy trên ổ đĩa này xong đã" : undefined}
                     onClick={() => handleEject(disk)}
-                    className="rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
                   >
                     {ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  icon={<EyeOff className="h-3.5 w-3.5" />}
                   disabled={assigned}
                   title={
                     assigned
@@ -336,15 +372,15 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                       : "Ẩn ổ đĩa này khỏi danh sách"
                   }
                   onClick={() => hideDisk(disk.id)}
-                  className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 disabled:opacity-40"
+                  className="!text-neutral-400"
                 >
                   Ẩn
-                </button>
+                </Button>
               </div>
               {ejectError[disk.id] && (
                 <p className="text-[10px] text-red-400">{ejectError[disk.id]}</p>
               )}
-            </li>
+            </Panel>
           );
         })}
       </ul>
@@ -357,6 +393,6 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
           onClose={() => setContextMenu(null)}
         />
       )}
-    </section>
+    </Panel>
   );
 }

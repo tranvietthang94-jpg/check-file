@@ -1,8 +1,14 @@
 import { useState } from "react";
 import { DriveIcon } from "./icons/DriveIcon";
+import { Button } from "./ui/Button";
+import { Panel } from "./ui/Panel";
+import { SectionHeading } from "./ui/SectionHeading";
+import { EmptyState } from "./ui/EmptyState";
+import { ArrowUpFromLine, FolderOpen, Inbox, Trash2 } from "./icons";
 import { DISK_DRAG_MIME, ENDPOINT_REORDER_MIME } from "../lib/dragTypes";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
+import { cn } from "../lib/cn";
 import type { DiskInfo, Endpoint } from "../types/disk";
 
 /** Filled blue pill for a manually-typed label, a white-outline pill for an
@@ -67,10 +73,13 @@ export function EndpointList({
   }
 
   return (
-    <section
-      className={`flex flex-col gap-2 rounded ${
-        onDropDisk ? `border border-dashed p-2 ${dragOver ? "border-green-500 bg-neutral-900/60" : "border-neutral-700"}` : ""
-      }`}
+    <Panel
+      as="section"
+      className={cn(
+        "flex flex-col gap-2 p-3",
+        onDropDisk && "!border-dashed",
+        dragOver && "!border-green-500 !bg-neutral-800/60",
+      )}
       onDragOver={(e) => {
         if (!onDropDisk) return;
         e.preventDefault();
@@ -85,13 +94,11 @@ export function EndpointList({
         if (diskId) onDropDisk(diskId);
       }}
     >
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        {title}
-      </h2>
+      <SectionHeading>{title}</SectionHeading>
       {endpoints.length === 0 && (
-        <p className="text-sm text-neutral-500">
+        <EmptyState icon={<Inbox className="h-5 w-5" />}>
           {onDropDisk ? "Chưa gán -- kéo một ổ đĩa vào đây, hoặc dùng nút + Nguồn/Đích." : "Chưa gán."}
-        </p>
+        </EmptyState>
       )}
       <ul className="flex flex-col gap-2">
         {endpoints.map((endpoint, index) => {
@@ -142,9 +149,9 @@ export function EndpointList({
                       disabled={ejecting[disk.id]}
                       title={ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
                       onClick={() => handleEject(disk)}
-                      className="absolute -right-1.5 -top-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-green-500 text-[6px] text-neutral-950 disabled:opacity-40"
+                      className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-500 text-neutral-950 disabled:opacity-40"
                     >
-                      ▲
+                      <ArrowUpFromLine className="h-2 w-2" strokeWidth={3} />
                     </button>
                   )}
                 </div>
@@ -172,21 +179,21 @@ export function EndpointList({
                   className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs ${labelPillClass(endpoint)}`}
                 />
                 {onBrowse && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="secondary"
+                    icon={<FolderOpen className="h-3.5 w-3.5" />}
                     onClick={() => onBrowse(endpoint.path)}
-                    className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs"
                   >
                     Duyệt
-                  </button>
+                  </Button>
                 )}
-                <button
-                  type="button"
+                <Button
+                  variant="danger"
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
                   onClick={() => onRemove(endpoint.diskId)}
-                  className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-red-400"
                 >
                   Xóa
-                </button>
+                </Button>
               </div>
               {ejectError[endpoint.diskId] && (
                 <p className="text-[10px] text-red-400">{ejectError[endpoint.diskId]}</p>
@@ -207,6 +214,6 @@ export function EndpointList({
           );
         })}
       </ul>
-    </section>
+    </Panel>
   );
 }

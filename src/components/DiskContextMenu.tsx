@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 export interface DiskContextMenuItem {
   label: string;
+  /** Small leading icon (e.g. from `components/icons`) -- purely decorative,
+   * omit for items where no obviously-matching icon exists. */
+  icon?: ReactNode;
   /** Omitted for a parent item that only exists to host `children` -- e.g.
    * "Source Folder ▶" itself does nothing on click, only its submenu items do. */
   onSelect?: () => void;
@@ -48,7 +52,10 @@ function MenuItems({
               item.danger ? "text-red-400" : "text-neutral-200"
             }`}
           >
-            <span>{item.label}</span>
+            <span className="flex items-center gap-2">
+              {item.icon && <span className="text-neutral-500">{item.icon}</span>}
+              {item.label}
+            </span>
             {item.children && <span className="text-neutral-500">▶</span>}
           </button>
           {item.children && openIndex === i && !item.disabled && (
