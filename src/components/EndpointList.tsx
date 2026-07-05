@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DriveIcon } from "./icons/DriveIcon";
-import { DISK_DRAG_MIME } from "../lib/dragTypes";
+import { DISK_DRAG_MIME, ENDPOINT_REORDER_MIME } from "../lib/dragTypes";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
 import type { DiskInfo, Endpoint } from "../types/disk";
@@ -32,6 +32,9 @@ interface EndpointListProps {
    * buttons already use, so drag-and-drop is just another way to do the
    * exact same thing. */
   onDropDisk?: (diskId: string) => void;
+  /** Drag one row onto another to reorder the list in place -- only wired
+   * up for Destinations, where list order doubles as Cascade hop order. */
+  onReorder?: (fromDiskId: string, toDiskId: string) => void;
 }
 
 export function EndpointList({
@@ -44,8 +47,10 @@ export function EndpointList({
   onBrowse,
   usageKind = "used",
   onDropDisk,
+  onReorder,
 }: EndpointListProps) {
   const [dragOver, setDragOver] = useState(false);
+  const [reorderOverId, setReorderOverId] = useState<string | null>(null);
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
 
@@ -89,14 +94,46 @@ export function EndpointList({
         </p>
       )}
       <ul className="flex flex-col gap-2">
-        {endpoints.map((endpoint) => {
+        {endpoints.map((endpoint, index) => {
           const disk = disks.find((d) => d.id === endpoint.diskId);
           return (
             <li
               key={endpoint.diskId}
-              className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2"
+              draggable={!!onReorder}
+              onDragStart={(e) => {
+                if (!onReorder) return;
+                e.dataTransfer.setData(ENDPOINT_REORDER_MIME, endpoint.diskId);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                if (!onReorder) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setReorderOverId(endpoint.diskId);
+              }}
+              onDragLeave={() => setReorderOverId((cur) => (cur === endpoint.diskId ? null : cur))}
+              onDrop={(e) => {
+                if (!onReorder) return;
+                const fromDiskId = e.dataTransfer.getData(ENDPOINT_REORDER_MIME);
+                if (!fromDiskId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setReorderOverId(null);
+                onReorder(fromDiskId, endpoint.diskId);
+              }}
+              title={onReorder ? "Drag to reorder -- this order is the Cascade hop order" : undefined}
+              className={`flex flex-col gap-2 rounded border px-3 py-2 ${
+                reorderOverId === endpoint.diskId
+                  ? "border-blue-500 bg-blue-500/10"
+                  : "border-neutral-800 bg-neutral-900"
+              } ${onReorder ? "cursor-grab active:cursor-grabbing" : ""}`}
             >
               <div className="flex items-center gap-2">
+                {onReorder && (
+                  <span className="shrink-0 text-neutral-600" aria-hidden="true">
+                    {index + 1}.
+                  </span>
+                )}
                 <div className="relative shrink-0">
                   <DriveIcon removable={disk?.isRemovable} className="h-5 w-5 text-neutral-500" />
                   {disk?.isRemovable && (

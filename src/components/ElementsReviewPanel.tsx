@@ -20,7 +20,7 @@ export function ElementsReviewPanel() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-30 flex w-64 flex-col gap-2 rounded border border-neutral-700 bg-neutral-900 p-3 text-xs shadow-lg"
+      className="fixed bottom-20 right-4 z-30 flex w-64 flex-col gap-2 rounded border border-neutral-700 bg-neutral-900 p-3 text-xs shadow-lg"
       onContextMenu={(e) => {
         e.preventDefault();
         setContextMenu({ x: e.clientX, y: e.clientY });

@@ -18,6 +18,9 @@ interface DisksState {
   addDestination: (diskId: string) => void;
   removeSource: (diskId: string) => void;
   removeDestination: (diskId: string) => void;
+  /** The AddTransfersBar's "clear" (✕) button -- resets both lists so the
+   * next Source/Destination pick starts from a clean slate. */
+  clearSourcesAndDestinations: () => void;
   setSourceLabel: (diskId: string, label: string) => void;
   setDestinationLabel: (diskId: string, label: string) => void;
   setSourcePath: (diskId: string, path: string) => void;
@@ -26,6 +29,11 @@ interface DisksState {
    * removing or manually overriding one never leaves a gap or a duplicate --
    * mirrors OffShoot's "recalculates remaining auto-labels" behavior. */
   recomputeAutoLabels: () => void;
+  /** Drag-to-reorder within the Destinations list -- this array's order *is*
+   * the Cascade hop order now that "Add N Transfers" builds a cascade chain
+   * straight from the live Destinations list instead of a per-click
+   * composer form. */
+  reorderDestinations: (fromDiskId: string, toDiskId: string) => void;
 }
 
 export const useDisksStore = create<DisksState>((set, get) => ({
@@ -87,6 +95,8 @@ export const useDisksStore = create<DisksState>((set, get) => ({
       destinations: state.destinations.filter((d) => d.diskId !== diskId),
     })),
 
+  clearSourcesAndDestinations: () => set({ sources: [], destinations: [] }),
+
   setSourceLabel: (diskId, label) => {
     // Typing into the label field is always a manual override, even if this
     // source's label happened to be auto-generated a moment ago.
@@ -116,6 +126,18 @@ export const useDisksStore = create<DisksState>((set, get) => ({
         d.diskId === diskId ? { ...d, path } : d,
       ),
     })),
+
+  reorderDestinations: (fromDiskId, toDiskId) =>
+    set((state) => {
+      if (fromDiskId === toDiskId) return state;
+      const fromIndex = state.destinations.findIndex((d) => d.diskId === fromDiskId);
+      const toIndex = state.destinations.findIndex((d) => d.diskId === toDiskId);
+      if (fromIndex === -1 || toIndex === -1) return state;
+      const next = [...state.destinations];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return { destinations: next };
+    }),
 
   recomputeAutoLabels: () => {
     const { autoLabel, dateOverride, elements } = useOrganizeStore.getState();

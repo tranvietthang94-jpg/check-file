@@ -27,7 +27,7 @@ import { DisksPanel } from "./components/DisksPanel";
 import { ElementsReviewPanel } from "./components/ElementsReviewPanel";
 import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
-import { GroupComposer } from "./components/GroupComposer";
+import { AddTransfersBar } from "./components/AddTransfersBar";
 import { MediaBrowser } from "./components/MediaBrowser";
 import { PreferencesModal } from "./components/PreferencesModal";
 import { ReportsPanel } from "./components/ReportsPanel";
@@ -62,6 +62,8 @@ function App() {
   const setDestinationLabel = useDisksStore((s) => s.setDestinationLabel);
   const setSourcePath = useDisksStore((s) => s.setSourcePath);
   const setDestinationPath = useDisksStore((s) => s.setDestinationPath);
+  const reorderDestinations = useDisksStore((s) => s.reorderDestinations);
+  const clearSourcesAndDestinations = useDisksStore((s) => s.clearSourcesAndDestinations);
 
   const jobs = useTransfersStore((s) => s.jobs);
   const addJob = useTransfersStore((s) => s.addJob);
@@ -275,6 +277,18 @@ function App() {
     );
   }
 
+  // AddTransfersBar's "Add N Transfers" -- matches OffShoot's own behavior
+  // of building every Source's transfer(s) against the full Destinations
+  // list in one click, instead of a per-click single-Source composer form.
+  // Parallel starts one group per Source (each fanning out to every
+  // Destination independently); Cascade starts one chain per Source through
+  // every Destination in the order the Destinations list is currently in.
+  async function handleAddTransfers(mode: TransferGroupMode, moveAfterTransfer: boolean) {
+    for (const source of sources) {
+      await handleStartGroup(source, destinations, mode, moveAfterTransfer);
+    }
+  }
+
   function handleCancelJob(jobId: string) {
     cancelCopy(jobId).catch(console.error);
   }
@@ -379,7 +393,6 @@ function App() {
 
       {view === "disks" ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-          <DisksPanel onVerifyRequested={() => setView("transfers")} />
           <EndpointList
             title="Sources"
             endpoints={sources}
@@ -390,6 +403,9 @@ function App() {
             onBrowse={handleBrowse}
             onDropDisk={addSource}
           />
+          <div className="md:col-span-2">
+            <DisksPanel onVerifyRequested={() => setView("transfers")} />
+          </div>
           <EndpointList
             title="Destinations"
             endpoints={destinations}
@@ -399,12 +415,7 @@ function App() {
             onPathChange={setDestinationPath}
             usageKind="free"
             onDropDisk={addDestination}
-          />
-          <GroupComposer
-            sources={sources}
-            destinations={destinations}
-            disks={disks}
-            onStart={handleStartGroup}
+            onReorder={reorderDestinations}
           />
           <ElementsReviewPanel />
         </div>
@@ -442,9 +453,18 @@ function App() {
             onPathChange={setDestinationPath}
             usageKind="free"
             onDropDisk={addDestination}
+            onReorder={reorderDestinations}
           />
         </div>
       )}
+
+      <AddTransfersBar
+        sources={sources}
+        destinations={destinations}
+        disks={disks}
+        onAdd={handleAddTransfers}
+        onClear={clearSourcesAndDestinations}
+      />
 
       <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
 
