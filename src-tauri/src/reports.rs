@@ -485,6 +485,7 @@ mod tests {
                 path: "C0001.MP4".to_string(),
                 checksum: "abc".to_string(),
                 algorithm: ChecksumAlgorithm::Xxh64,
+                legacy_checksum: None, legacy_algorithm: None,
             }],
             skipped_files: Vec::new(),
             renamed_files: Vec::new(),
@@ -616,6 +617,7 @@ mod tests {
             path: "C0001.MP4".to_string(),
             checksum: "x".to_string(),
             algorithm: ChecksumAlgorithm::Xxh64,
+            legacy_checksum: None, legacy_algorithm: None,
         }];
         b.verified_files = a.verified_files.clone();
         let entries = [a, b];

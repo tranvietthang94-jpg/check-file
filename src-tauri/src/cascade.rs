@@ -60,6 +60,7 @@ fn spawn_job<R: Runtime>(
     organize: OrganizeSettings,
     move_after_transfer: bool,
     move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> String {
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = app_handle.state::<JobRegistry>().register(job_id.clone());
@@ -106,6 +107,7 @@ fn spawn_job<R: Runtime>(
             organize,
             move_after_transfer,
             move_same_volume,
+            legacy_checksum_algorithm,
         );
     });
 
@@ -127,6 +129,7 @@ pub fn start_transfer_group<R: Runtime>(
     organize: OrganizeSettings,
     move_after_transfer: bool,
     move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> String {
     let group_id = Uuid::new_v4().to_string();
 
@@ -154,6 +157,7 @@ pub fn start_transfer_group<R: Runtime>(
                     organize.clone(),
                     effective_move,
                     effective_same_volume_move,
+                    legacy_checksum_algorithm,
                 );
             }
         }
@@ -220,6 +224,7 @@ pub fn start_transfer_group<R: Runtime>(
                     organize_thread.clone(),
                     move_after_transfer,
                     move_same_volume,
+                    legacy_checksum_algorithm,
                 );
 
                 if !should_cascade_continue(&outcome) {
@@ -243,6 +248,7 @@ pub fn start_transfer_group<R: Runtime>(
                         organize_thread.clone(),
                         false,
                         false,
+                        legacy_checksum_algorithm,
                     );
                 }
             });
@@ -289,6 +295,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false,
+            None, // legacy_checksum_algorithm
         );
         assert!(should_cascade_continue(&hop1));
 
@@ -304,6 +311,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false,
+            None, // legacy_checksum_algorithm
         );
 
         assert!(hop2.failed_files.is_empty());

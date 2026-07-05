@@ -12,6 +12,11 @@ export interface VerifiedFile {
   path: string;
   checksum: string;
   algorithm: ChecksumAlgorithm;
+  /** OffShoot's "Also generate legacy checksums" -- a second hash computed
+   * alongside the primary one, for interop with tooling expecting an older
+   * algorithm. Absent unless that Preferences > Transfers setting is on. */
+  legacyChecksum?: string;
+  legacyAlgorithm?: ChecksumAlgorithm;
 }
 
 export interface SkippedFile {

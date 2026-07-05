@@ -44,6 +44,7 @@ export function startTransferGroup(
   organize: OrganizeSettings,
   moveAfterTransfer: boolean,
   moveSameVolume: boolean,
+  legacyChecksumAlgorithm: ChecksumAlgorithm | null,
 ): Promise<string> {
   return invoke<string>("start_transfer_group", {
     source,
@@ -55,6 +56,7 @@ export function startTransferGroup(
     organize,
     moveAfterTransfer,
     moveSameVolume,
+    legacyChecksumAlgorithm,
   });
 }
 

@@ -18,6 +18,11 @@ const ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
   { value: "sha1", label: "SHA-1" },
 ];
 
+const LEGACY_ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
+  { value: "sha1", label: "SHA-1" },
+  { value: "md5", label: "MD5" },
+];
+
 const QUEUE_MODES: { value: QueueMode; label: string; hint: string }[] = [
   { value: "off", label: "Off", hint: "Every transfer starts immediately" },
   {
@@ -38,10 +43,14 @@ export function TransfersPreferences() {
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
   const queueMode = useSettingsStore((s) => s.queueMode);
   const moveSameVolume = useSettingsStore((s) => s.moveSameVolume);
+  const legacyChecksumEnabled = useSettingsStore((s) => s.legacyChecksumEnabled);
+  const legacyChecksumAlgorithm = useSettingsStore((s) => s.legacyChecksumAlgorithm);
   const setVerificationMode = useSettingsStore((s) => s.setVerificationMode);
   const setChecksumAlgorithm = useSettingsStore((s) => s.setChecksumAlgorithm);
   const setQueueMode = useSettingsStore((s) => s.setQueueMode);
   const setMoveSameVolume = useSettingsStore((s) => s.setMoveSameVolume);
+  const setLegacyChecksumEnabled = useSettingsStore((s) => s.setLegacyChecksumEnabled);
+  const setLegacyChecksumAlgorithm = useSettingsStore((s) => s.setLegacyChecksumAlgorithm);
 
   return (
     <div className="flex flex-col gap-6">
@@ -103,6 +112,28 @@ export function TransfersPreferences() {
             className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 disabled:opacity-40"
           >
             {ALGORITHMS.map((a) => (
+              <option key={a.value} value={a.value}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex cursor-pointer items-center gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={legacyChecksumEnabled}
+            disabled={verificationMode === "transfer"}
+            onChange={(e) => setLegacyChecksumEnabled(e.currentTarget.checked)}
+          />
+          <span>Also generate legacy checksums:</span>
+          <select
+            value={legacyChecksumAlgorithm}
+            onChange={(e) => setLegacyChecksumAlgorithm(e.currentTarget.value as ChecksumAlgorithm)}
+            disabled={!legacyChecksumEnabled || verificationMode === "transfer"}
+            className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 disabled:opacity-40"
+          >
+            {LEGACY_ALGORITHMS.map((a) => (
               <option key={a.value} value={a.value}>
                 {a.label}
               </option>

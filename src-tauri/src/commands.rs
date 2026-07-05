@@ -54,6 +54,7 @@ pub fn start_transfer_group(
     organize: OrganizeSettings,
     move_after_transfer: bool,
     move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> String {
     cascade::start_transfer_group(
         app_handle,
@@ -66,6 +67,7 @@ pub fn start_transfer_group(
         organize,
         move_after_transfer,
         move_same_volume,
+        legacy_checksum_algorithm,
     )
 }
 

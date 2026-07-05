@@ -62,8 +62,22 @@ const HASH_BUFFER_SIZE: usize = 1024 * 1024;
 /// Hashes a file from disk in one independent read pass. Used to verify a
 /// destination file after copying (Source & Destination verification mode).
 pub fn hash_file(path: &Path, algorithm: ChecksumAlgorithm) -> std::io::Result<String> {
+    let (primary, _) = hash_file_dual(path, algorithm, None)?;
+    Ok(primary)
+}
+
+/// Like [`hash_file`], but also feeds a second "legacy" algorithm off the
+/// same read pass when `legacy_algorithm` is set -- OffShoot's "Also
+/// generate legacy checksums" preference runs a second hash alongside the
+/// primary one without re-reading the file a second time.
+pub fn hash_file_dual(
+    path: &Path,
+    algorithm: ChecksumAlgorithm,
+    legacy_algorithm: Option<ChecksumAlgorithm>,
+) -> std::io::Result<(String, Option<String>)> {
     let mut file = fs::File::open(path)?;
     let mut hasher = StreamingHasher::new(algorithm);
+    let mut legacy_hasher = legacy_algorithm.map(StreamingHasher::new);
     let mut buffer = vec![0u8; HASH_BUFFER_SIZE];
     loop {
         let n = file.read(&mut buffer)?;
@@ -71,8 +85,11 @@ pub fn hash_file(path: &Path, algorithm: ChecksumAlgorithm) -> std::io::Result<S
             break;
         }
         hasher.update(&buffer[..n]);
+        if let Some(h) = legacy_hasher.as_mut() {
+            h.update(&buffer[..n]);
+        }
     }
-    Ok(hasher.finalize_hex())
+    Ok((hasher.finalize_hex(), legacy_hasher.map(|h| h.finalize_hex())))
 }
 
 /// Re-reads `path` and compares its checksum against `expected_hash`.
@@ -135,6 +152,29 @@ mod tests {
         single.update(data);
 
         assert_eq!(chunked.finalize_hex(), single.finalize_hex());
+    }
+
+    #[test]
+    fn hash_file_dual_computes_both_algorithms_from_one_read_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.bin");
+        fs::write(&path, b"camera footage").unwrap();
+
+        let (primary, legacy) =
+            hash_file_dual(&path, ChecksumAlgorithm::Xxh64, Some(ChecksumAlgorithm::Sha1)).unwrap();
+
+        assert_eq!(primary, hash_file(&path, ChecksumAlgorithm::Xxh64).unwrap());
+        assert_eq!(legacy, Some(hash_file(&path, ChecksumAlgorithm::Sha1).unwrap()));
+    }
+
+    #[test]
+    fn hash_file_dual_without_a_legacy_algorithm_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.bin");
+        fs::write(&path, b"camera footage").unwrap();
+
+        let (_, legacy) = hash_file_dual(&path, ChecksumAlgorithm::Xxh64, None).unwrap();
+        assert_eq!(legacy, None);
     }
 
     #[test]

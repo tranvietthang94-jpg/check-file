@@ -26,6 +26,11 @@ pub struct MhlFileEntry {
     pub checksum: Option<String>,
     pub algorithm: ChecksumAlgorithm,
     pub hashed_at: SystemTime,
+    /// OffShoot's "Also generate legacy checksums" -- a second hash-choice
+    /// element written alongside the primary one in the same `<hash>`
+    /// block, for interop with tooling that expects an older algorithm.
+    pub legacy_checksum: Option<String>,
+    pub legacy_algorithm: Option<ChecksumAlgorithm>,
 }
 
 pub(crate) fn iso8601(t: SystemTime) -> String {
@@ -106,6 +111,11 @@ pub fn render_mhl(entries: &[MhlFileEntry], started_at: SystemTime, finished_at:
                     match &entry.checksum {
                         Some(hash) => write_text_element(writer, hash_tag(entry.algorithm), hash)?,
                         None => write_text_element(writer, "null", "")?,
+                    }
+                    if let (Some(hash), Some(algorithm)) =
+                        (&entry.legacy_checksum, entry.legacy_algorithm)
+                    {
+                        write_text_element(writer, hash_tag(algorithm), hash)?;
                     }
                     write_text_element(writer, "hashdate", &iso8601(entry.hashed_at))?;
                     Ok(())
@@ -425,6 +435,8 @@ mod tests {
             checksum: Some("0ea03b369a463d9d".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_100),
+            legacy_checksum: None,
+            legacy_algorithm: None,
         }
     }
 
@@ -607,6 +619,7 @@ mod tests {
             checksum: Some(checksum::hash_file(&file_path, ChecksumAlgorithm::Xxh64).unwrap()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
+            legacy_checksum: None, legacy_algorithm: None,
         };
         let mhl_path = write_mhl(dst_dir.path(), &[entry], SystemTime::now(), SystemTime::now())
             .unwrap()
@@ -633,6 +646,7 @@ mod tests {
                 checksum: Some(checksum::hash_file(&good_path, ChecksumAlgorithm::Xxh64).unwrap()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
+                legacy_checksum: None, legacy_algorithm: None,
             },
             MhlFileEntry {
                 relative_path: "corrupted.bin".to_string(),
@@ -641,6 +655,7 @@ mod tests {
                 checksum: Some("deadbeefdeadbeef".to_string()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
+                legacy_checksum: None, legacy_algorithm: None,
             },
             MhlFileEntry {
                 relative_path: "missing.bin".to_string(),
@@ -649,6 +664,7 @@ mod tests {
                 checksum: Some("0000000000000000".to_string()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
+                legacy_checksum: None, legacy_algorithm: None,
             },
         ];
         let mhl_path = write_mhl(dst_dir.path(), &entries, SystemTime::now(), SystemTime::now())
@@ -684,6 +700,7 @@ mod tests {
                 checksum: Some(checksum::hash_file(&path, ChecksumAlgorithm::Xxh64).unwrap()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
+                legacy_checksum: None, legacy_algorithm: None,
             }
         };
         let first_path = write_mhl(dst_dir.path(), &[entry_for("a.bin")], SystemTime::now(), SystemTime::now())

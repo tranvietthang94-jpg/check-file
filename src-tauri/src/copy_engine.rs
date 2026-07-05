@@ -100,6 +100,8 @@ pub struct VerifiedFile {
     pub path: String,
     pub checksum: String,
     pub algorithm: ChecksumAlgorithm,
+    pub legacy_checksum: Option<String>,
+    pub legacy_algorithm: Option<ChecksumAlgorithm>,
 }
 
 /// A file that already existed at the destination with the same name, size,
@@ -429,7 +431,12 @@ enum CopyFileOutcome {
     Cancelled,
     /// `source_hash` is `Some` only when verification requested it (Transfer
     /// mode skips hashing entirely to stay as fast as a plain OS copy).
-    Completed { source_hash: Option<String> },
+    /// `legacy_hash` is `Some` only when a legacy checksum algorithm was
+    /// also requested (OffShoot's "Also generate legacy checksums").
+    Completed {
+        source_hash: Option<String>,
+        legacy_hash: Option<String>,
+    },
 }
 
 /// The path a file is streamed into while its copy (and, for Source &
@@ -462,11 +469,16 @@ fn copy_file_chunked(
     relative_display: &str,
     checksum_algorithm: ChecksumAlgorithm,
     compute_hash: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
     source_modified: SystemTime,
 ) -> std::io::Result<CopyFileOutcome> {
     let mut src_file = fs::File::open(src)?;
     let dst_file = fs::File::create(dst)?;
     let mut hasher = compute_hash.then(|| StreamingHasher::new(checksum_algorithm));
+    let mut legacy_hasher = compute_hash
+        .then_some(legacy_checksum_algorithm)
+        .flatten()
+        .map(StreamingHasher::new);
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
@@ -482,6 +494,9 @@ fn copy_file_chunked(
         if let Some(h) = hasher.as_mut() {
             h.update(&buffer[..n]);
         }
+        if let Some(h) = legacy_hasher.as_mut() {
+            h.update(&buffer[..n]);
+        }
         tracker.add_bytes(n as u64, relative_display);
     }
 
@@ -494,6 +509,7 @@ fn copy_file_chunked(
 
     Ok(CopyFileOutcome::Completed {
         source_hash: hasher.map(|h| h.finalize_hex()),
+        legacy_hash: legacy_hasher.map(|h| h.finalize_hex()),
     })
 }
 
@@ -512,6 +528,7 @@ pub fn run_copy_core(
     organize: &OrganizeSettings,
     move_after_transfer: bool,
     move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> CopyOutcome {
     // OffShoot's "Don't copy but move data when a Source and Destination are
     // located on the same volume": when both resolve to the same physical
@@ -737,9 +754,13 @@ pub fn run_copy_core(
             // verification mode would do) so Reports/MHLs get a real
             // checksum -- only the write side skips the redundant
             // copy-then-delete dance a cross-volume Move needs.
-            let hash = if compute_hash_for_this_file {
-                match checksum::hash_file(&entry.absolute, checksum_algorithm) {
-                    Ok(h) => Some(h),
+            let (hash, legacy_hash) = if compute_hash_for_this_file {
+                match checksum::hash_file_dual(
+                    &entry.absolute,
+                    checksum_algorithm,
+                    legacy_checksum_algorithm,
+                ) {
+                    Ok((h, legacy)) => (Some(h), legacy),
                     Err(err) => {
                         failed_files.push(FailedFile {
                             path: copy_display.clone(),
@@ -749,7 +770,7 @@ pub fn run_copy_core(
                     }
                 }
             } else {
-                known_hash.clone()
+                (known_hash.clone(), None)
             };
             match fs::rename(&entry.absolute, &dest_path) {
                 Ok(()) => {
@@ -760,6 +781,8 @@ pub fn run_copy_core(
                             path: copy_display.clone(),
                             checksum: h.clone(),
                             algorithm: checksum_algorithm,
+                            legacy_checksum: legacy_hash.clone(),
+                            legacy_algorithm: legacy_hash.as_ref().and(legacy_checksum_algorithm),
                         });
                     }
                     mhl_entries.push(MhlFileEntry {
@@ -769,6 +792,8 @@ pub fn run_copy_core(
                         checksum: hash,
                         algorithm: checksum_algorithm,
                         hashed_at: SystemTime::now(),
+                        legacy_checksum: legacy_hash,
+                        legacy_algorithm: legacy_checksum_algorithm,
                     });
                     deleted_source_files.push(copy_display);
                 }
@@ -800,6 +825,7 @@ pub fn run_copy_core(
                 &copy_display,
                 checksum_algorithm,
                 compute_hash_for_this_file,
+                legacy_checksum_algorithm,
                 entry.modified,
             );
             if result.is_err() && should_retry_copy(attempt, cancel_flag.load(Ordering::SeqCst)) {
@@ -812,10 +838,13 @@ pub fn run_copy_core(
         };
 
         match copy_result {
-            Ok(CopyFileOutcome::Completed { source_hash }) => {
+            Ok(CopyFileOutcome::Completed { source_hash, legacy_hash }) => {
                 tracker.finish_file();
                 // Falls back to the MHL-Awareness checksum when this file's
                 // hashing was skipped because it was already known-good.
+                // MHL Awareness never carries a legacy checksum forward
+                // (the reused entry only recorded the primary algorithm),
+                // so a known-good file simply has no legacy hash this run.
                 let source_hash = source_hash.or_else(|| known_hash.clone());
                 // Feeds the MHL: `None` means Transfer mode (size-only entry, no
                 // hash computed); a failed/mismatched verification below clears
@@ -869,6 +898,8 @@ pub fn run_copy_core(
                                     path: copy_display.clone(),
                                     checksum: hash.clone(),
                                     algorithm: checksum_algorithm,
+                                    legacy_checksum: legacy_hash.clone(),
+                                    legacy_algorithm: legacy_hash.as_ref().and(legacy_checksum_algorithm),
                                 });
                                 mhl_checksum = Some(hash.clone());
                             }
@@ -902,6 +933,8 @@ pub fn run_copy_core(
                         checksum: mhl_checksum,
                         algorithm: checksum_algorithm,
                         hashed_at: SystemTime::now(),
+                        legacy_checksum: legacy_hash,
+                        legacy_algorithm: legacy_checksum_algorithm,
                     });
                 }
             }
@@ -1006,6 +1039,7 @@ pub fn run_copy_job<R: Runtime>(
     organize: OrganizeSettings,
     move_after_transfer: bool,
     move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> CopyOutcome {
     let sink = TauriProgressSink {
         app_handle: &app_handle,
@@ -1025,6 +1059,7 @@ pub fn run_copy_job<R: Runtime>(
         &organize,
         move_after_transfer,
         move_same_volume,
+        legacy_checksum_algorithm,
     );
     let finished_at = SystemTime::now();
 
@@ -1140,6 +1175,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(!outcome.cancelled);
@@ -1175,6 +1211,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.cancelled);
@@ -1211,6 +1248,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1241,6 +1279,7 @@ mod tests {
             checksum: Some("0000000000000000".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
+            legacy_checksum: None, legacy_algorithm: None,
         };
         mhl::write_mhl(src_dir.path(), &[bogus_entry], SystemTime::now(), SystemTime::now()).unwrap();
 
@@ -1257,6 +1296,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         // `write_mhl` drops the source MHL directly into `src_dir`, so the
@@ -1294,6 +1334,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.files_copied, 0);
@@ -1332,6 +1373,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         // The final flush always emits at least one progress event.
@@ -1359,6 +1401,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(!outcome.cancelled);
@@ -1388,6 +1431,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1418,6 +1462,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1449,6 +1494,7 @@ mod tests {
                 &OrganizeSettings::default(),
                 false,
                 false, // move_same_volume
+                None, // legacy_checksum_algorithm
             )
         };
 
@@ -1490,6 +1536,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1542,6 +1589,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         let dest_modified = fs::metadata(dst_dir.path().join("clip.mp4"))
@@ -1580,6 +1628,7 @@ mod tests {
             &organize,
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1615,6 +1664,7 @@ mod tests {
             &organize,
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1651,6 +1701,7 @@ mod tests {
             &organize,
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1685,6 +1736,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -1713,6 +1765,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -1721,6 +1774,47 @@ mod tests {
             outcome.mhl_entries[0].checksum.as_deref(),
             Some(outcome.verified_files[0].checksum.as_str()),
         );
+    }
+
+    #[test]
+    fn a_legacy_checksum_algorithm_is_computed_alongside_the_primary_one() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_file = src_dir.path().join("clip.mp4");
+        fs::write(&src_file, b"camera footage").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-legacy-checksum".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+            false, // move_same_volume
+            Some(ChecksumAlgorithm::Sha1), // legacy_checksum_algorithm
+        );
+
+        let expected_legacy = checksum::hash_file(&src_file, ChecksumAlgorithm::Sha1).unwrap();
+        assert_eq!(
+            outcome.verified_files[0].legacy_checksum.as_deref(),
+            Some(expected_legacy.as_str())
+        );
+        assert_eq!(
+            outcome.verified_files[0].legacy_algorithm,
+            Some(ChecksumAlgorithm::Sha1)
+        );
+        assert_eq!(
+            outcome.mhl_entries[0].legacy_checksum.as_deref(),
+            Some(expected_legacy.as_str())
+        );
+
+        let xml = mhl::render_mhl(&outcome.mhl_entries, SystemTime::now(), SystemTime::now());
+        assert!(xml.contains(&format!("<sha1>{expected_legacy}</sha1>")));
     }
 
     #[test]
@@ -1742,6 +1836,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -1770,6 +1865,7 @@ mod tests {
             checksum: Some("deadbeefdeadbeef".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
+            legacy_checksum: None, legacy_algorithm: None,
         };
         mhl::write_mhl(src_dir.path(), &[fake_entry], SystemTime::now(), SystemTime::now()).unwrap();
 
@@ -1786,6 +1882,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1817,6 +1914,7 @@ mod tests {
             checksum: Some("deadbeefdeadbeef".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
+            legacy_checksum: None, legacy_algorithm: None,
         };
         mhl::write_mhl(src_dir.path(), &[stale_entry], SystemTime::now(), SystemTime::now()).unwrap();
 
@@ -1833,6 +1931,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         let clip_verification = outcome
@@ -1867,6 +1966,7 @@ mod tests {
             &OrganizeSettings::default(),
             true,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1903,6 +2003,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             true, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1939,6 +2040,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1972,6 +2074,7 @@ mod tests {
             &OrganizeSettings::default(),
             true,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.deleted_source_files.is_empty());
@@ -1998,6 +2101,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
         assert!(src_file.exists());
 
@@ -2016,6 +2120,7 @@ mod tests {
             &OrganizeSettings::default(),
             true,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.skipped_files.len(), 1);
@@ -2045,6 +2150,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.broken_media_files, vec!["dropped.mp4".to_string()]);
@@ -2082,6 +2188,7 @@ mod tests {
             &OrganizeSettings::default(),
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert!(outcome.cancelled);
@@ -2124,6 +2231,7 @@ mod tests {
             &organize,
             false,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         // Still recorded for the transfer log/report even though nobody was asked.
@@ -2156,6 +2264,7 @@ mod tests {
             &OrganizeSettings::default(),
             true,
             false, // move_same_volume
+            None, // legacy_checksum_algorithm
         );
 
         assert_eq!(outcome.failed_files.len(), 1);

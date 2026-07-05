@@ -88,6 +88,9 @@ function App() {
   const checksumAlgorithm = useSettingsStore((s) => s.checksumAlgorithm);
   const desktopNotifications = useSettingsStore((s) => s.desktopNotifications);
   const moveSameVolume = useSettingsStore((s) => s.moveSameVolume);
+  const legacyChecksumEnabled = useSettingsStore((s) => s.legacyChecksumEnabled);
+  const legacyChecksumAlgorithm = useSettingsStore((s) => s.legacyChecksumAlgorithm);
+  const effectiveLegacyChecksumAlgorithm = legacyChecksumEnabled ? legacyChecksumAlgorithm : null;
 
   const refreshTransferLogs = useTransferLogStore((s) => s.refresh);
 
@@ -258,6 +261,7 @@ function App() {
       organize,
       moveAfterTransfer,
       moveSameVolume,
+      effectiveLegacyChecksumAlgorithm,
     );
     setGroupMeta(
       groupId,
@@ -321,6 +325,7 @@ function App() {
       organize,
       false,
       moveSameVolume,
+      effectiveLegacyChecksumAlgorithm,
     );
     setGroupMeta(groupId, "parallel", job.sourceLabel, [job.destinationLabel]);
   }
