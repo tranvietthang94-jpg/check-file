@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { DriveIcon } from "./icons/DriveIcon";
 import { DISK_DRAG_MIME } from "../lib/dragTypes";
+import { ejectDisk } from "../lib/tauri";
+import { formatBytes } from "../lib/format";
 import type { DiskInfo, Endpoint } from "../types/disk";
 
-/** Blue for a manually-typed label, a white outline for an Auto Label -- mirrors OffShoot. */
-function labelBorderClass(endpoint: Endpoint): string {
-  if (endpoint.label === "") return "border-neutral-700";
-  return endpoint.isAutoLabel ? "border-white" : "border-blue-500";
+/** Filled blue pill for a manually-typed label, a white-outline pill for an
+ * Auto Label, plain input otherwise -- mirrors OffShoot's label badges. */
+function labelPillClass(endpoint: Endpoint): string {
+  if (endpoint.label === "") {
+    return "border border-neutral-700 bg-neutral-950 text-neutral-100";
+  }
+  return endpoint.isAutoLabel
+    ? "border-2 border-white bg-transparent text-white"
+    : "border border-blue-600 bg-blue-600 text-white";
 }
 
 interface EndpointListProps {
@@ -17,6 +24,9 @@ interface EndpointListProps {
   onLabelChange: (diskId: string, label: string) => void;
   onPathChange: (diskId: string, path: string) => void;
   onBrowse?: (path: string) => void;
+  /** "in use" (Sources) vs "free" (Destinations) -- matches which stat
+   * OffShoot surfaces under the label on each side. */
+  usageKind?: "used" | "free";
   /** Called with the dragged disk's id when it's dropped here -- typically
    * wired straight to the same store action the "+ Source/Destination"
    * buttons already use, so drag-and-drop is just another way to do the
@@ -32,9 +42,24 @@ export function EndpointList({
   onLabelChange,
   onPathChange,
   onBrowse,
+  usageKind = "used",
   onDropDisk,
 }: EndpointListProps) {
   const [dragOver, setDragOver] = useState(false);
+  const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
+  const [ejectError, setEjectError] = useState<Record<string, string>>({});
+
+  async function handleEject(disk: DiskInfo) {
+    setEjecting((prev) => ({ ...prev, [disk.id]: true }));
+    setEjectError((prev) => ({ ...prev, [disk.id]: "" }));
+    try {
+      await ejectDisk(disk.mountPoint);
+    } catch (err) {
+      setEjectError((prev) => ({ ...prev, [disk.id]: String(err) }));
+    } finally {
+      setEjecting((prev) => ({ ...prev, [disk.id]: false }));
+    }
+  }
 
   return (
     <section
@@ -72,12 +97,32 @@ export function EndpointList({
               className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 px-3 py-2"
             >
               <div className="flex items-center gap-2">
-                <DriveIcon removable={disk?.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
+                <div className="relative shrink-0">
+                  <DriveIcon removable={disk?.isRemovable} className="h-5 w-5 text-neutral-500" />
+                  {disk?.isRemovable && (
+                    <button
+                      type="button"
+                      disabled={ejecting[disk.id]}
+                      title={ejecting[disk.id] ? "Ejecting…" : "Eject"}
+                      onClick={() => handleEject(disk)}
+                      className="absolute -right-1.5 -top-1.5 flex h-3 w-3 items-center justify-center rounded-full bg-green-500 text-[6px] text-neutral-950 disabled:opacity-40"
+                    >
+                      ▲
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-col">
                   <span className="font-medium">{disk?.name ?? endpoint.diskId}</span>
                   <span className="text-xs text-neutral-500">
                     {disk?.mountPoint ?? "(unplugged)"}
                   </span>
+                  {disk && (
+                    <span className="text-[10px] text-neutral-600">
+                      {usageKind === "used"
+                        ? `${formatBytes(disk.totalBytes - disk.availableBytes)} in use`
+                        : `${formatBytes(disk.availableBytes)} free`}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -87,7 +132,7 @@ export function EndpointList({
                   placeholder="Label…"
                   title={endpoint.isAutoLabel ? "Auto-generated label" : "Label"}
                   autoComplete="off"
-                  className={`w-24 shrink-0 rounded border bg-neutral-950 px-2 py-1 text-xs ${labelBorderClass(endpoint)}`}
+                  className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs ${labelPillClass(endpoint)}`}
                 />
                 {onBrowse && (
                   <button
@@ -106,6 +151,9 @@ export function EndpointList({
                   Remove
                 </button>
               </div>
+              {ejectError[endpoint.diskId] && (
+                <p className="text-[10px] text-red-400">{ejectError[endpoint.diskId]}</p>
+              )}
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-500">
                   Folder path

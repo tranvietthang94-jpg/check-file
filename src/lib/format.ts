@@ -27,6 +27,17 @@ export function formatDuration(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** "About 5 seconds" / "About 2 minutes" -- matches OffShoot's job-row ETA phrasing. */
+export function formatEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const s = Math.round(seconds);
+  if (s < 60) return `About ${s} second${s === 1 ? "" : "s"}`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `About ${m} minute${m === 1 ? "" : "s"}`;
+  const h = Math.round(m / 60);
+  return `About ${h} hour${h === 1 ? "" : "s"}`;
+}
+
 export function formatFrameRate(fps: number): string {
   const rounded = Math.round(fps * 100) / 100;
   return `${rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(2)} fps`;

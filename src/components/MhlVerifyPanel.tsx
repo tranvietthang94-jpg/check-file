@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { verifyMhl, verifyMhlsInFolder } from "../lib/tauri";
+import { useMhlVerifyStore } from "../state/mhlVerifyStore";
 import type { MhlEntryStatus, MhlVerifyReport } from "../types/mhl";
 
 const STATUS_LABEL: Record<MhlEntryStatus, string> = {
@@ -45,26 +44,14 @@ function ReportCard({ report }: { report: MhlVerifyReport }) {
 }
 
 export function MhlVerifyPanel() {
-  const [path, setPath] = useState("");
-  const [mode, setMode] = useState<"file" | "folder">("file");
-  const [busy, setBusy] = useState(false);
-  const [reports, setReports] = useState<MhlVerifyReport[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleVerify() {
-    if (!path.trim()) return;
-    setBusy(true);
-    setError(null);
-    setReports(null);
-    try {
-      const result = mode === "file" ? [await verifyMhl(path)] : await verifyMhlsInFolder(path);
-      setReports(result);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const path = useMhlVerifyStore((s) => s.path);
+  const mode = useMhlVerifyStore((s) => s.mode);
+  const busy = useMhlVerifyStore((s) => s.busy);
+  const reports = useMhlVerifyStore((s) => s.reports);
+  const error = useMhlVerifyStore((s) => s.error);
+  const setPath = useMhlVerifyStore((s) => s.setPath);
+  const setMode = useMhlVerifyStore((s) => s.setMode);
+  const runVerify = useMhlVerifyStore((s) => s.runVerify);
 
   return (
     <section className="col-span-full flex flex-col gap-2">
@@ -108,7 +95,7 @@ export function MhlVerifyPanel() {
         <button
           type="button"
           disabled={!path.trim() || busy}
-          onClick={handleVerify}
+          onClick={() => runVerify()}
           className="w-fit shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
         >
           {busy ? "Verifying…" : "Verify"}

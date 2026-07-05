@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface TemplateToken {
   name: string;
@@ -69,6 +69,14 @@ export function TemplateBuilder({
 }: TemplateBuilderProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const segments = parseTemplate(value);
+  const [menuIndex, setMenuIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (menuIndex === null) return;
+    const close = () => setMenuIndex(null);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [menuIndex]);
 
   function commit(next: Segment[]) {
     onChange(serializeTemplate(next));
@@ -125,18 +133,35 @@ export function TemplateBuilder({
             <span
               key={i}
               data-segment-index={i}
-              className="flex items-center gap-1 rounded bg-green-500/15 px-2 py-0.5 font-mono text-[11px] text-green-400"
+              className="relative flex items-center gap-1 rounded bg-green-500/15 px-2 py-0.5 font-mono text-[11px] text-green-400"
             >
               {seg.name}
               {!disabled && (
                 <button
                   type="button"
-                  onClick={() => removeToken(i)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuIndex(menuIndex === i ? null : i);
+                  }}
                   className="text-green-400/70 hover:text-green-200"
-                  aria-label={`Remove {${seg.name}}`}
+                  aria-label={`Options for {${seg.name}}`}
                 >
-                  ×
+                  ⌄
                 </button>
+              )}
+              {menuIndex === i && (
+                <div className="absolute left-0 top-full z-10 mt-1 rounded border border-neutral-700 bg-neutral-900 py-0.5 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      removeToken(i);
+                      setMenuIndex(null);
+                    }}
+                    className="whitespace-nowrap px-2 py-1 text-left font-mono text-[11px] text-neutral-200 hover:bg-neutral-800"
+                  >
+                    Remove
+                  </button>
+                </div>
               )}
             </span>
           ) : (

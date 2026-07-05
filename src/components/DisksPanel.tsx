@@ -2,6 +2,7 @@ import { useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useDisksStore } from "../state/disksStore";
 import { useTransfersStore } from "../state/transfersStore";
+import { useMhlVerifyStore } from "../state/mhlVerifyStore";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
 import { DISK_DRAG_MIME } from "../lib/dragTypes";
@@ -9,6 +10,13 @@ import { DriveIcon } from "./icons/DriveIcon";
 import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
 import type { DiskInfo } from "../types/disk";
 import type { TransferJob } from "../types/job";
+
+interface DisksPanelProps {
+  /** Lets the panel jump to the Transfers view after "Verify" is chosen from
+   * a disk's context menu, since that's where the Verify MHL results panel
+   * lives -- optional so the component still works standalone/in tests. */
+  onVerifyRequested?: () => void;
+}
 
 function isDiskBusy(disk: DiskInfo, jobs: TransferJob[]): boolean {
   return jobs.some(
@@ -19,7 +27,7 @@ function isDiskBusy(disk: DiskInfo, jobs: TransferJob[]): boolean {
   );
 }
 
-export function DisksPanel() {
+export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const disks = useDisksStore((s) => s.disks);
   const sources = useDisksStore((s) => s.sources);
   const destinations = useDisksStore((s) => s.destinations);
@@ -28,6 +36,7 @@ export function DisksPanel() {
   const hiddenDiskIds = useDisksStore((s) => s.hiddenDiskIds);
   const hideDisk = useDisksStore((s) => s.hideDisk);
   const jobs = useTransfersStore((s) => s.jobs);
+  const runVerify = useMhlVerifyStore((s) => s.runVerify);
 
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
@@ -76,6 +85,13 @@ export function DisksPanel() {
     items.push({
       label: "Open in Explorer",
       onSelect: () => revealItemInDir(disk.mountPoint).catch(console.error),
+    });
+    items.push({
+      label: "Verify",
+      onSelect: () => {
+        runVerify(disk.mountPoint, "folder");
+        onVerifyRequested?.();
+      },
     });
     items.push({
       label: "Hide",

@@ -1,7 +1,7 @@
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { TransferJob } from "../types/job";
 import type { TransferGroup } from "../types/transferGroup";
-import { formatBytes, formatSpeed } from "../lib/format";
+import { formatBytes, formatEta, formatSpeed } from "../lib/format";
 import { CancelIcon, ResumeIcon, RevealIcon } from "./icons/JobActionIcons";
 
 const ICON_BUTTON =
@@ -111,7 +111,17 @@ function JobRow({
         <span className="truncate">{job.currentFile || "—"}</span>
         <span className="shrink-0">
           {formatBytes(job.bytesCopied)} / {formatBytes(job.totalBytes)}
-          {job.status === "copying" ? ` · ${formatSpeed(job.bytesPerSec)}` : ""}
+          {job.status === "copying" && job.bytesPerSec > 0 ? (
+            <>
+              {" · "}
+              {formatEta((job.totalBytes - job.bytesCopied) / job.bytesPerSec)} (
+              {formatSpeed(job.bytesPerSec)})
+            </>
+          ) : job.status === "copying" ? (
+            ` · ${formatSpeed(job.bytesPerSec)}`
+          ) : (
+            ""
+          )}
         </span>
       </div>
 

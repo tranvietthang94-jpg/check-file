@@ -364,7 +364,7 @@ function App() {
 
       {view === "disks" ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-          <DisksPanel />
+          <DisksPanel onVerifyRequested={() => setView("transfers")} />
           <EndpointList
             title="Sources"
             endpoints={sources}
@@ -382,6 +382,7 @@ function App() {
             onRemove={removeDestination}
             onLabelChange={setDestinationLabel}
             onPathChange={setDestinationPath}
+            usageKind="free"
             onDropDisk={addDestination}
           />
           <GroupComposer
