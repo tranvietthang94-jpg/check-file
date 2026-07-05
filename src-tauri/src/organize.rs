@@ -231,6 +231,7 @@ const JUNK_DIR_NAMES: &[&str] = &[
     ".trashes",
     ".fseventsd",
     ".temporaryitems",
+    "__macosx",
 ];
 
 /// True for OS/filesystem housekeeping entries (Windows' `Thumbs.db` /
@@ -876,6 +877,12 @@ mod tests {
             "System Volume Information/IndexerVolumeGuid"
         )));
         assert!(is_os_junk_file(Path::new("$RECYCLE.BIN/S-1-5-21/file.mp4")));
+    }
+
+    #[test]
+    fn macosx_zip_artifact_directory_is_flagged() {
+        assert!(is_os_junk_file(Path::new("__MACOSX/CLIP/._C0001.MP4")));
+        assert!(is_os_junk_file(Path::new("__macosx/._C0001.MP4")));
     }
 
     #[test]
