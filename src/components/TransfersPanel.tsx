@@ -7,6 +7,15 @@ import { CancelIcon, ResumeIcon, RevealIcon } from "./icons/JobActionIcons";
 const ICON_BUTTON =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-neutral-700 hover:bg-neutral-800";
 
+/** `sourcePath` and a source-relative path (as recorded in
+ * `brokenMediaFiles`/`pendingBrokenMedia`) may use either separator --
+ * normalizing to "/" before joining works for both Windows and macOS. */
+function joinPath(root: string, relative: string): string {
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedRelative = relative.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `${normalizedRoot}/${normalizedRelative}`;
+}
+
 interface TransfersPanelProps {
   groups: TransferGroup[];
   jobs: Record<string, TransferJob>;
@@ -16,12 +25,20 @@ interface TransfersPanelProps {
   onResolveBrokenMedia: (jobId: string, proceed: boolean) => void;
 }
 
-const STATUS_COLOR: Record<TransferJob["status"], string> = {
-  queued: "bg-neutral-500",
-  copying: "bg-blue-500",
-  complete: "bg-green-500",
-  cancelled: "bg-orange-500",
-};
+/** Matches OffShoot's progress-bar color coding: grey while queued, blue
+ * while copying, green on a clean completion, red for a hardware/checksum
+ * failure, orange for a cancelled job or one with an integrity issue
+ * (broken/corrupted source media) that was continued anyway. */
+function progressBarColor(job: TransferJob): string {
+  if (job.status === "cancelled") return "bg-orange-500";
+  if (job.status === "complete") {
+    if (job.failedFiles.length > 0) return "bg-red-400";
+    if (job.brokenMediaFiles.length > 0) return "bg-orange-500";
+    return "bg-green-500";
+  }
+  if (job.status === "copying") return "bg-blue-500";
+  return "bg-neutral-500";
+}
 
 const MODE_LABEL: Record<TransferGroup["mode"], string> = {
   parallel: "Parallel",
@@ -102,7 +119,7 @@ function JobRow({
 
       <div className="h-1.5 w-full overflow-hidden rounded bg-neutral-800">
         <div
-          className={`h-full ${STATUS_COLOR[job.status]} transition-all`}
+          className={`h-full ${progressBarColor(job)} transition-all`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -132,6 +149,17 @@ function JobRow({
             card that dropped out mid-recording.
           </p>
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                revealItemInDir(joinPath(job.sourcePath, job.pendingBrokenMedia![0])).catch(
+                  console.error,
+                )
+              }
+              className="rounded border border-neutral-700 px-2 py-1 text-neutral-200"
+            >
+              Show in Finder
+            </button>
             <button
               type="button"
               onClick={() => onResolveBrokenMedia(job.id, true)}
