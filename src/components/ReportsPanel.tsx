@@ -2,6 +2,14 @@ import { useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useTransferLogStore } from "../state/transferLogStore";
 import { generateReport } from "../lib/tauri";
+import { SectionHeading } from "./ui/SectionHeading";
+import { Checkbox } from "./ui/Checkbox";
+import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
+import { EmptyState } from "./ui/EmptyState";
+import { FileText, X } from "./icons";
+
+const CARD_LABEL = "rounded border border-neutral-800 bg-neutral-900 px-2 py-1";
 
 function formatTimestamp(iso: string): string {
   const parsed = new Date(iso);
@@ -91,13 +99,13 @@ export function ReportsPanel() {
 
   return (
     <section className="col-span-full flex flex-col gap-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">Báo cáo</h2>
+      <SectionHeading>Báo cáo</SectionHeading>
 
       {logs.length === 0 ? (
-        <p className="text-xs text-neutral-500">
+        <EmptyState icon={<FileText className="h-5 w-5" />}>
           Chưa có lượt truyền nào hoàn tất -- Báo cáo tổng hợp một hoặc nhiều mục trong Nhật ký
           truyền tải.
-        </p>
+        </EmptyState>
       ) : (
         <>
           <div className="flex flex-col gap-1">
@@ -107,18 +115,20 @@ export function ReportsPanel() {
             <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
               {logs.map((entry) => (
                 <li key={entry.jobId}>
-                  <label className="flex items-start gap-2 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(entry.jobId)}
-                      onChange={() => toggleSelected(entry.jobId)}
-                      className="mt-0.5"
-                    />
-                    <span className="flex flex-col">
-                      <span className="font-medium">{entry.sourceName}</span>
-                      <span className="text-neutral-500">{formatTimestamp(entry.finishedAt)}</span>
-                    </span>
-                  </label>
+                  <Checkbox
+                    align="start"
+                    className={CARD_LABEL}
+                    checked={selectedIds.includes(entry.jobId)}
+                    onChange={() => toggleSelected(entry.jobId)}
+                    label={
+                      <span className="flex flex-col">
+                        <span className="font-medium">{entry.sourceName}</span>
+                        <span className="text-neutral-500">
+                          {formatTimestamp(entry.finishedAt)}
+                        </span>
+                      </span>
+                    }
+                  />
                 </li>
               ))}
             </ul>
@@ -151,13 +161,12 @@ export function ReportsPanel() {
                     className="text-xs"
                   />
                   {logoDataUrl && (
-                    <button
-                      type="button"
+                    <IconButton
                       onClick={clearLogo}
-                      className="shrink-0 rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:text-neutral-200"
-                    >
-                      Xóa
-                    </button>
+                      aria-label="Xóa logo"
+                      title="Xóa logo"
+                      icon={<X className="h-3.5 w-3.5" />}
+                    />
                   )}
                 </div>
               </label>
@@ -186,23 +195,21 @@ export function ReportsPanel() {
             />
           </label>
 
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={includeThumbnails}
-              onChange={(e) => setIncludeThumbnails(e.currentTarget.checked)}
-            />
-            Kèm ảnh thu nhỏ clip (chậm hơn -- đọc lại tệp tại đích)
-          </label>
+          <Checkbox
+            checked={includeThumbnails}
+            onChange={(e) => setIncludeThumbnails(e.currentTarget.checked)}
+            label="Kèm ảnh thu nhỏ clip (chậm hơn -- đọc lại tệp tại đích)"
+          />
 
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            icon={<FileText className="h-3.5 w-3.5" />}
             disabled={selectedIds.length === 0 || busy}
             onClick={handleGenerate}
-            className="w-fit rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
+            className="w-fit"
           >
             {busy ? "Đang tạo…" : "Tạo báo cáo"}
-          </button>
+          </Button>
 
           {status && (
             <p className="text-[10px] text-neutral-500">

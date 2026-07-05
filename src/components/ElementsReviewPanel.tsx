@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useOrganizeStore } from "../state/organizeStore";
 import { DiskContextMenu } from "./DiskContextMenu";
+import { IconButton } from "./ui/IconButton";
+import { ChevronDown, ChevronUp } from "./icons";
 
 /**
  * Floating panel in the corner of the Disks view for entering each custom
@@ -30,15 +32,18 @@ export function ElementsReviewPanel() {
         <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
           Thành phần
         </span>
-        <button
-          type="button"
+        <IconButton
           onClick={() => setCollapsed((c) => !c)}
           title={collapsed ? "Mở rộng" : "Thu gọn"}
           aria-label={collapsed ? "Mở rộng bảng Thành phần" : "Thu gọn bảng Thành phần"}
-          className="flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 text-neutral-400 hover:text-neutral-200"
-        >
-          {collapsed ? "⌃" : "⌄"}
-        </button>
+          icon={
+            collapsed ? (
+              <ChevronUp className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )
+          }
+        />
       </div>
 
       {!collapsed && (

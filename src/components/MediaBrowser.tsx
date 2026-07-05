@@ -1,11 +1,23 @@
 import type { MediaEntry, MediaKind } from "../types/media";
 import { formatBytes, formatDuration, formatFrameRate } from "../lib/format";
+import { Panel } from "./ui/Panel";
+import { SectionHeading } from "./ui/SectionHeading";
+import { EmptyState } from "./ui/EmptyState";
+import { IconButton } from "./ui/IconButton";
+import { File, ImageIcon, Inbox, Music, Video, X } from "./icons";
 
 const KIND_LABEL: Record<MediaKind, string> = {
   video: "video",
   audio: "âm thanh",
   photo: "ảnh",
   other: "khác",
+};
+
+const KIND_ICON: Record<MediaKind, typeof Video> = {
+  video: Video,
+  audio: Music,
+  photo: ImageIcon,
+  other: File,
 };
 
 interface MediaBrowserProps {
@@ -44,37 +56,27 @@ function metadataLine(entry: MediaEntry): string {
 
 export function MediaBrowser({ folder, entries, status, total, onClose }: MediaBrowserProps) {
   return (
-    <section className="col-span-full flex flex-col gap-3 rounded border border-neutral-800 bg-neutral-900 p-4">
+    <Panel as="section" className="col-span-full flex flex-col gap-3 p-4">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-            Duyệt Nguồn
-          </h2>
+          <SectionHeading>Duyệt Nguồn</SectionHeading>
           <p className="truncate text-xs text-neutral-500">{folder}</p>
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <span className="text-xs text-neutral-500">
             {status === "scanning" ? `Đang quét… ${entries.length}` : `${total} tệp`}
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-neutral-700 px-2 py-1 text-xs"
-          >
-            Đóng
-          </button>
+          <IconButton onClick={onClose} aria-label="Đóng" icon={<X className="h-3.5 w-3.5" />} />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {entries.map((entry) => {
           const line = metadataLine(entry);
+          const KindIcon = KIND_ICON[entry.kind];
           return (
-            <div
-              key={entry.path}
-              className="flex flex-col gap-1 overflow-hidden rounded border border-neutral-800 bg-neutral-950"
-            >
-              <div className="flex aspect-video items-center justify-center bg-neutral-900">
+            <Panel key={entry.path} className="flex flex-col gap-1 overflow-hidden">
+              <div className="flex aspect-video items-center justify-center bg-neutral-950">
                 {entry.thumbnailBase64 ? (
                   <img
                     src={`data:image/jpeg;base64,${entry.thumbnailBase64}`}
@@ -82,7 +84,7 @@ export function MediaBrowser({ folder, entries, status, total, onClose }: MediaB
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <span className="text-[10px] uppercase text-neutral-600">{KIND_LABEL[entry.kind]}</span>
+                  <KindIcon className="h-6 w-6 text-neutral-600" aria-label={KIND_LABEL[entry.kind]} />
                 )}
               </div>
               <div className="flex flex-col gap-0.5 px-2 pb-2">
@@ -96,14 +98,14 @@ export function MediaBrowser({ folder, entries, status, total, onClose }: MediaB
                   </span>
                 )}
               </div>
-            </div>
+            </Panel>
           );
         })}
       </div>
 
       {entries.length === 0 && status === "complete" && (
-        <p className="text-sm text-neutral-500">Không tìm thấy tệp nào.</p>
+        <EmptyState icon={<Inbox className="h-5 w-5" />}>Không tìm thấy tệp nào.</EmptyState>
       )}
-    </section>
+    </Panel>
   );
 }

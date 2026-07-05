@@ -25,4 +25,13 @@ export {
   FolderTree,
   Eye,
   Save,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Video,
+  Music,
+  Image as ImageIcon,
+  File,
+  FileText,
+  History,
 } from "lucide-react";

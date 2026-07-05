@@ -1,4 +1,11 @@
 import { useMhlVerifyStore } from "../state/mhlVerifyStore";
+import { Panel } from "./ui/Panel";
+import { SectionHeading } from "./ui/SectionHeading";
+import { EmptyState } from "./ui/EmptyState";
+import { Button } from "./ui/Button";
+import { Radio } from "./ui/Checkbox";
+import { Badge, type BadgeTone } from "./ui/Badge";
+import { ShieldCheck } from "./icons";
 import type { MhlEntryStatus, MhlVerifyReport } from "../types/mhl";
 
 const STATUS_LABEL: Record<MhlEntryStatus, string> = {
@@ -9,37 +16,37 @@ const STATUS_LABEL: Record<MhlEntryStatus, string> = {
   noChecksumRecorded: "Không có mã băm ghi nhận",
 };
 
-const STATUS_CLASS: Record<MhlEntryStatus, string> = {
-  verified: "text-green-400",
-  mismatch: "text-red-400",
-  missing: "text-red-400",
-  sizeMismatch: "text-orange-400",
-  noChecksumRecorded: "text-neutral-400",
+const STATUS_TONE: Record<MhlEntryStatus, BadgeTone> = {
+  verified: "green",
+  mismatch: "red",
+  missing: "red",
+  sizeMismatch: "orange",
+  noChecksumRecorded: "neutral",
 };
 
 function ReportCard({ report }: { report: MhlVerifyReport }) {
   const problems = report.results.filter((r) => r.status !== "verified" && r.status !== "noChecksumRecorded");
   return (
-    <div className="rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs">
+    <Panel className="px-2 py-1.5 text-xs">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-mono" title={report.mhlPath}>
           {report.mhlPath}
         </span>
-        <span className={problems.length === 0 ? "text-green-400" : "text-red-400"}>
+        <Badge tone={problems.length === 0 ? "green" : "red"}>
           {problems.length === 0
             ? `${report.results.length} hợp lệ`
             : `${problems.length} vấn đề`}
-        </span>
+        </Badge>
       </div>
       <ul className="mt-1 flex flex-col gap-0.5">
         {report.results.map((r) => (
           <li key={r.relativePath} className="flex items-center justify-between gap-2">
             <span className="truncate text-neutral-400">{r.relativePath}</span>
-            <span className={STATUS_CLASS[r.status]}>{STATUS_LABEL[r.status]}</span>
+            <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
           </li>
         ))}
       </ul>
-    </div>
+    </Panel>
   );
 }
 
@@ -55,33 +62,25 @@ export function MhlVerifyPanel() {
 
   return (
     <section className="col-span-full flex flex-col gap-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-        Xác minh MHL
-      </h2>
+      <SectionHeading>Xác minh MHL</SectionHeading>
       <p className="text-xs text-neutral-500">
         Kiểm tra lại mã băm đã ghi trong một tệp .mhl có sẵn so với các tệp thật trên đĩa -- không
         cần chạy lượt truyền nào.
       </p>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1 text-xs">
-          <input
-            type="radio"
-            name="mhl-verify-mode"
-            checked={mode === "file"}
-            onChange={() => setMode("file")}
-          />
-          Một tệp .mhl
-        </label>
-        <label className="flex items-center gap-1 text-xs">
-          <input
-            type="radio"
-            name="mhl-verify-mode"
-            checked={mode === "folder"}
-            onChange={() => setMode("folder")}
-          />
-          Tất cả tệp .mhl trong một thư mục
-        </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <Radio
+          name="mhl-verify-mode"
+          checked={mode === "file"}
+          onChange={() => setMode("file")}
+          label="Một tệp .mhl"
+        />
+        <Radio
+          name="mhl-verify-mode"
+          checked={mode === "folder"}
+          onChange={() => setMode("folder")}
+          label="Tất cả tệp .mhl trong một thư mục"
+        />
       </div>
 
       <div className="flex items-center gap-2">
@@ -92,14 +91,15 @@ export function MhlVerifyPanel() {
           autoComplete="off"
           className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
         />
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          icon={<ShieldCheck className="h-3.5 w-3.5" />}
           disabled={!path.trim() || busy}
           onClick={() => runVerify()}
-          className="w-fit shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs disabled:opacity-40"
+          className="w-fit shrink-0"
         >
           {busy ? "Đang xác minh…" : "Xác minh"}
-        </button>
+        </Button>
       </div>
 
       {error && <p className="text-[10px] text-red-400">{error}</p>}
@@ -107,7 +107,9 @@ export function MhlVerifyPanel() {
       {reports && (
         <div className="flex flex-col gap-2">
           {reports.length === 0 ? (
-            <p className="text-xs text-neutral-500">Không tìm thấy tệp .mhl nào ở đó.</p>
+            <EmptyState icon={<ShieldCheck className="h-5 w-5" />}>
+              Không tìm thấy tệp .mhl nào ở đó.
+            </EmptyState>
           ) : (
             reports.map((report) => <ReportCard key={report.mhlPath} report={report} />)
           )}

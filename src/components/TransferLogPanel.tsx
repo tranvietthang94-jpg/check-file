@@ -1,6 +1,12 @@
 import { useEffect } from "react";
 import { useTransferLogStore } from "../state/transferLogStore";
 import { formatBytes } from "../lib/format";
+import { Panel } from "./ui/Panel";
+import { SectionHeading } from "./ui/SectionHeading";
+import { EmptyState } from "./ui/EmptyState";
+import { Button } from "./ui/Button";
+import { Badge } from "./ui/Badge";
+import { History, RefreshCw } from "./icons";
 import type { TransferLogEntry } from "../types/transferLog";
 
 interface TransferLogPanelProps {
@@ -21,11 +27,11 @@ function formatTimestamp(iso: string): string {
 function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: (path: string) => void }) {
   const mhlName = mhlFileName(entry.mhlPath);
   return (
-    <li className="flex flex-col gap-1 rounded border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs">
+    <Panel as="li" className="flex flex-col gap-1 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium">
+        <span className="flex items-center gap-2 font-medium">
           {entry.sourceName}
-          {entry.cancelled && <span className="ml-2 text-orange-400">Đã dừng</span>}
+          {entry.cancelled && <Badge tone="orange">Đã dừng</Badge>}
         </span>
         <span className="text-neutral-500">{formatTimestamp(entry.finishedAt)}</span>
       </div>
@@ -53,14 +59,10 @@ function LogRow({ entry, onViewClips }: { entry: TransferLogEntry; onViewClips: 
         )}
         {mhlName && <span title={entry.mhlPath ?? undefined}>MHL: {mhlName}</span>}
       </div>
-      <button
-        type="button"
-        onClick={() => onViewClips(entry.destination)}
-        className="mt-1 w-fit rounded border border-neutral-700 px-2 py-1 text-xs"
-      >
+      <Button variant="secondary" className="mt-1 w-fit" onClick={() => onViewClips(entry.destination)}>
         Xem clip
-      </button>
-    </li>
+      </Button>
+    </Panel>
   );
 }
 
@@ -76,23 +78,26 @@ export function TransferLogPanel({ onViewClips }: TransferLogPanelProps) {
 
   return (
     <section className="col-span-full flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral-400">
-          Nhật ký truyền tải
-        </h2>
-        <button
-          type="button"
-          onClick={() => refresh()}
-          className="rounded border border-neutral-700 px-2 py-1 text-xs"
-        >
-          Làm mới
-        </button>
-      </div>
+      <SectionHeading
+        action={
+          <Button
+            variant="secondary"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            onClick={() => refresh()}
+          >
+            Làm mới
+          </Button>
+        }
+      >
+        Nhật ký truyền tải
+      </SectionHeading>
 
       {loading && <p className="text-xs text-neutral-500">Đang tải…</p>}
       {error && <p className="text-xs text-red-400">{error}</p>}
       {!loading && logs.length === 0 && (
-        <p className="text-xs text-neutral-500">Chưa có lượt truyền nào hoàn tất.</p>
+        <EmptyState icon={<History className="h-5 w-5" />}>
+          Chưa có lượt truyền nào hoàn tất.
+        </EmptyState>
       )}
 
       <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">

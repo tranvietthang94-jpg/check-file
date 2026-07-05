@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { Badge } from "../ui/Badge";
+import { ChevronDown } from "../icons";
 
 export interface TemplateToken {
   name: string;
@@ -119,7 +121,7 @@ export function TemplateBuilder({
           if (!name || !rowRef.current) return;
           insertTokenAt(name, computeDropIndex(rowRef.current, e.clientX));
         }}
-        className={`flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 ${
+        className={`relative flex min-h-[34px] flex-wrap items-center gap-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 ${
           disabled ? "opacity-40" : ""
         }`}
       >
@@ -130,10 +132,12 @@ export function TemplateBuilder({
         )}
         {segments.map((seg, i) =>
           seg.type === "token" ? (
-            <span
+            <Badge
               key={i}
               data-segment-index={i}
-              className="relative flex items-center gap-1 rounded bg-green-500/15 px-2 py-0.5 font-mono text-[11px] text-green-400"
+              tone="green"
+              uppercase={false}
+              className="relative"
             >
               {seg.name}
               {!disabled && (
@@ -146,7 +150,7 @@ export function TemplateBuilder({
                   className="text-green-400/70 hover:text-green-200"
                   aria-label={`Tùy chọn cho {${seg.name}}`}
                 >
-                  ⌄
+                  <ChevronDown className="h-3 w-3" />
                 </button>
               )}
               {menuIndex === i && (
@@ -163,7 +167,7 @@ export function TemplateBuilder({
                   </button>
                 </div>
               )}
-            </span>
+            </Badge>
           ) : (
             <input
               key={i}
@@ -172,6 +176,7 @@ export function TemplateBuilder({
               disabled={disabled}
               onChange={(e) => updateText(i, e.currentTarget.value)}
               autoComplete="off"
+              title="Văn bản cố định trong mẫu"
               style={{ width: `${Math.max(seg.value.length, 2)}ch` }}
               className="bg-transparent font-mono text-xs text-neutral-100 outline-none disabled:cursor-not-allowed"
             />
