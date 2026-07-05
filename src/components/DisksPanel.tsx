@@ -9,10 +9,10 @@ import { formatBytes } from "../lib/format";
 import { DISK_DRAG_MIME } from "../lib/dragTypes";
 import { DriveIcon } from "./icons/DriveIcon";
 import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
-import { Button } from "./ui/Button";
 import { Panel } from "./ui/Panel";
 import { SectionHeading } from "./ui/SectionHeading";
 import { EmptyState } from "./ui/EmptyState";
+import { IconButton } from "./ui/IconButton";
 import {
   ArrowRightLeft,
   ArrowUpFromLine,
@@ -21,6 +21,7 @@ import {
   FolderInput,
   FolderOutput,
   HardDrive,
+  Menu,
   Pencil,
   Plus,
   ShieldCheck,
@@ -242,6 +243,13 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     return items;
   }
 
+  // OffShoot's real Disks grid only shows disks not already assigned as a
+  // Source or Destination -- once assigned, a disk lives in that column
+  // instead and disappears from here.
+  const availableDisks = visibleDisks.filter(
+    (d) => !sources.some((s) => s.diskId === d.id) && !destinations.some((dest) => dest.diskId === d.id),
+  );
+
   return (
     <Panel as="section" className="flex flex-col gap-2 p-3">
       <SectionHeading>Ổ đĩa</SectionHeading>
@@ -253,12 +261,13 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
           Mọi ổ đĩa phát hiện được đều đang bị ẩn -- bỏ ẩn ở Cài đặt → Ổ đĩa.
         </EmptyState>
       )}
-      <ul className="flex flex-col gap-2">
-        {visibleDisks.map((disk) => {
-          const isSource = sources.some((s) => s.diskId === disk.id);
-          const isDestination = destinations.some((d) => d.diskId === disk.id);
-          const assigned = isSource || isDestination;
-          const busy = isDiskBusy(disk, Object.values(jobs));
+      {visibleDisks.length > 0 && availableDisks.length === 0 && (
+        <EmptyState icon={<HardDrive className="h-5 w-5" />}>
+          Mọi ổ đĩa đã được gán làm Nguồn hoặc Đích.
+        </EmptyState>
+      )}
+      <ul className="flex flex-wrap gap-3">
+        {availableDisks.map((disk) => {
           return (
             <Panel
               as="li"
@@ -273,113 +282,77 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                 setContextMenu({ x: e.clientX, y: e.clientY, diskId: disk.id });
               }}
               title="Kéo vào Nguồn/Đích, hoặc chuột phải để xem thêm thao tác"
-              className="flex cursor-grab flex-col gap-2 px-3 py-2 active:cursor-grabbing"
+              className="group relative flex w-32 cursor-grab flex-col items-center gap-1 px-3 py-3 text-center active:cursor-grabbing"
             >
-              <div className="flex items-center gap-2">
-                <DriveIcon removable={disk.isRemovable} className="h-5 w-5 shrink-0 text-neutral-500" />
-                <div className="flex flex-col">
-                  {editingLabelDiskId === disk.id ? (
-                    <input
-                      autoFocus
-                      value={labelDraft}
-                      onChange={(e) => setLabelDraft(e.currentTarget.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      onDragStart={(e) => e.stopPropagation()}
-                      onBlur={() => commitLabelEdit(disk.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitLabelEdit(disk.id);
-                        if (e.key === "Escape") setEditingLabelDiskId(null);
-                      }}
-                      placeholder="Nhãn…"
-                      autoComplete="off"
-                      className="w-32 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-sm font-medium"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      title="Bấm để thêm/sửa nhãn -- đặt ổ đĩa này làm Nguồn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        startEditingLabel(disk);
-                      }}
-                      className="w-fit text-left font-medium hover:underline"
-                    >
-                      {sources.find((s) => s.diskId === disk.id)?.label || disk.name}
-                    </button>
-                  )}
-                  <span className="text-xs text-neutral-500">
-                    {disk.mountPoint} · còn trống {formatBytes(disk.availableBytes)} /{" "}
-                    {formatBytes(disk.totalBytes)}
-                    {disk.isRemovable ? " · di động" : ""}
-                  </span>
-                  {renamingDiskId === disk.id && (
-                    <input
-                      autoFocus
-                      value={renameDraft}
-                      onChange={(e) => setRenameDraft(e.currentTarget.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      onDragStart={(e) => e.stopPropagation()}
-                      onBlur={() => commitRename(disk)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitRename(disk);
-                        if (e.key === "Escape") setRenamingDiskId(null);
-                      }}
-                      title="Đổi tên volume thật của ổ đĩa (khác với Nhãn chỉ dùng trong app)"
-                      autoComplete="off"
-                      className="mt-1 w-32 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-xs"
-                    />
-                  )}
-                  {renameError[disk.id] && (
-                    <p className="text-[10px] text-red-400">{renameError[disk.id]}</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  icon={<Plus className="h-3.5 w-3.5" />}
-                  disabled={isSource}
-                  onClick={() => addSource(disk.id)}
-                >
-                  Nguồn
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon={<Plus className="h-3.5 w-3.5" />}
-                  disabled={isDestination}
-                  onClick={() => addDestination(disk.id)}
-                >
-                  Đích
-                </Button>
-                {disk.isRemovable && (
-                  <Button
-                    variant="secondary"
-                    icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
-                    disabled={busy || ejecting[disk.id]}
-                    title={busy ? "Đợi các lượt truyền đang chạy trên ổ đĩa này xong đã" : undefined}
-                    onClick={() => handleEject(disk)}
+              <div className="flex w-full flex-col items-center gap-1">
+                <IconButton
+                  aria-label={`Thêm thao tác cho ${disk.name}`}
+                  title="Thêm thao tác"
+                  icon={<Menu className="h-3.5 w-3.5" />}
+                  className="absolute right-1 top-1 opacity-0 group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setContextMenu({ x: rect.right - 200, y: rect.bottom + 4, diskId: disk.id });
+                  }}
+                />
+                <DriveIcon removable={disk.isRemovable} className="h-8 w-8 text-neutral-400" />
+                {editingLabelDiskId === disk.id ? (
+                  <input
+                    autoFocus
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.currentTarget.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDragStart={(e) => e.stopPropagation()}
+                    onBlur={() => commitLabelEdit(disk.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitLabelEdit(disk.id);
+                      if (e.key === "Escape") setEditingLabelDiskId(null);
+                    }}
+                    placeholder="Nhãn…"
+                    autoComplete="off"
+                    className="w-full rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-center text-xs font-medium"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    title="Bấm để thêm/sửa nhãn -- đặt ổ đĩa này làm Nguồn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEditingLabel(disk);
+                    }}
+                    className="w-full truncate text-xs font-medium hover:underline"
                   >
-                    {ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
-                  </Button>
+                    {sources.find((s) => s.diskId === disk.id)?.label || disk.name}
+                  </button>
                 )}
-                <Button
-                  variant="secondary"
-                  icon={<EyeOff className="h-3.5 w-3.5" />}
-                  disabled={assigned}
-                  title={
-                    assigned
-                      ? "Gỡ khỏi Nguồn/Đích trước đã"
-                      : "Ẩn ổ đĩa này khỏi danh sách"
-                  }
-                  onClick={() => hideDisk(disk.id)}
-                  className="!text-neutral-400"
-                >
-                  Ẩn
-                </Button>
+                <span className="truncate text-[10px] text-neutral-500">
+                  {formatBytes(disk.availableBytes)} / {formatBytes(disk.totalBytes)}
+                </span>
+                {renamingDiskId === disk.id && (
+                  <input
+                    autoFocus
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.currentTarget.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onDragStart={(e) => e.stopPropagation()}
+                    onBlur={() => commitRename(disk)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename(disk);
+                      if (e.key === "Escape") setRenamingDiskId(null);
+                    }}
+                    title="Đổi tên volume thật của ổ đĩa (khác với Nhãn chỉ dùng trong app)"
+                    autoComplete="off"
+                    className="w-full rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-center text-[10px]"
+                  />
+                )}
+                {renameError[disk.id] && (
+                  <p className="text-[10px] text-red-400">{renameError[disk.id]}</p>
+                )}
+                {ejectError[disk.id] && (
+                  <p className="text-[10px] text-red-400">{ejectError[disk.id]}</p>
+                )}
               </div>
-              {ejectError[disk.id] && (
-                <p className="text-[10px] text-red-400">{ejectError[disk.id]}</p>
-              )}
             </Panel>
           );
         })}

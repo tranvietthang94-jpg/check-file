@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { DriveIcon } from "./icons/DriveIcon";
-import { Button } from "./ui/Button";
 import { Panel } from "./ui/Panel";
 import { SectionHeading } from "./ui/SectionHeading";
 import { EmptyState } from "./ui/EmptyState";
-import { ArrowUpFromLine, FolderOpen, Inbox, Trash2 } from "./icons";
+import { IconButton } from "./ui/IconButton";
+import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
+import { ArrowUpFromLine, ExternalLink, FolderInput, Inbox, Menu as MenuIcon, Plus, Tag, Trash2 } from "./icons";
 import { DISK_DRAG_MIME, ENDPOINT_REORDER_MIME } from "../lib/dragTypes";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
@@ -12,11 +14,8 @@ import { cn } from "../lib/cn";
 import type { DiskInfo, Endpoint } from "../types/disk";
 
 /** Filled blue pill for a manually-typed label, a white-outline pill for an
- * Auto Label, plain input otherwise -- mirrors OffShoot's label badges. */
+ * Auto Label -- mirrors OffShoot's label badges. */
 function labelPillClass(endpoint: Endpoint): string {
-  if (endpoint.label === "") {
-    return "border border-neutral-700 bg-neutral-950 text-neutral-100";
-  }
   return endpoint.isAutoLabel
     ? "border-2 border-white bg-transparent text-white"
     : "border border-blue-600 bg-blue-600 text-white";
@@ -59,6 +58,11 @@ export function EndpointList({
   const [reorderOverId, setReorderOverId] = useState<string | null>(null);
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; diskId: string } | null>(
+    null,
+  );
+  const [editingLabelDiskId, setEditingLabelDiskId] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
 
   async function handleEject(disk: DiskInfo) {
     setEjecting((prev) => ({ ...prev, [disk.id]: true }));
@@ -71,6 +75,74 @@ export function EndpointList({
       setEjecting((prev) => ({ ...prev, [disk.id]: false }));
     }
   }
+
+  function startEditingLabel(endpoint: Endpoint) {
+    setEditingLabelDiskId(endpoint.diskId);
+    setLabelDraft(endpoint.label);
+  }
+
+  function commitLabelEdit(diskId: string) {
+    setEditingLabelDiskId(null);
+    onLabelChange(diskId, labelDraft.trim());
+  }
+
+  async function chooseFolderPath(diskId: string, fallbackMountPoint?: string) {
+    const folder = await openFolderDialog({ directory: true, defaultPath: fallbackMountPoint });
+    if (!folder || Array.isArray(folder)) return;
+    onPathChange(diskId, folder);
+  }
+
+  /** Real OffShoot's "+" in an empty Sources/Destinations zone opens a
+   * native folder picker directly (not tied to a disk card the user already
+   * see) -- matched here by finding which recognized disk the chosen folder
+   * lives under, then reusing the exact same `onDropDisk`+`onPathChange`
+   * calls a drag-and-drop already triggers. */
+  async function handleAddViaPicker() {
+    if (!onDropDisk) return;
+    const folder = await openFolderDialog({ directory: true });
+    if (!folder || Array.isArray(folder)) return;
+    const normalized = folder.replace(/\\/g, "/").toLowerCase();
+    const disk = disks.find((d) =>
+      normalized.startsWith(d.mountPoint.replace(/\\/g, "/").toLowerCase()),
+    );
+    if (!disk) return;
+    onDropDisk(disk.id);
+    onPathChange(disk.id, folder);
+  }
+
+  function buildMenuItems(endpoint: Endpoint, disk: DiskInfo | undefined): DiskContextMenuItem[] {
+    const iconClass = "h-3.5 w-3.5";
+    const items: DiskContextMenuItem[] = [
+      {
+        label: "Sửa nhãn…",
+        icon: <Tag className={iconClass} />,
+        onSelect: () => startEditingLabel(endpoint),
+      },
+      {
+        label: "Đường dẫn thư mục…",
+        icon: <FolderInput className={iconClass} />,
+        onSelect: () => chooseFolderPath(endpoint.diskId, disk?.mountPoint),
+      },
+    ];
+    if (onBrowse) {
+      items.push({
+        label: "Xem clip",
+        icon: <ExternalLink className={iconClass} />,
+        onSelect: () => onBrowse(endpoint.path),
+      });
+    }
+    items.push({
+      label: "Xóa",
+      icon: <Trash2 className={iconClass} />,
+      danger: true,
+      onSelect: () => onRemove(endpoint.diskId),
+    });
+    return items;
+  }
+
+  const contextMenuEndpoint = contextMenu
+    ? endpoints.find((e) => e.diskId === contextMenu.diskId)
+    : undefined;
 
   return (
     <Panel
@@ -97,7 +169,17 @@ export function EndpointList({
       <SectionHeading>{title}</SectionHeading>
       {endpoints.length === 0 && (
         <EmptyState icon={<Inbox className="h-5 w-5" />}>
-          {onDropDisk ? "Chưa gán -- kéo một ổ đĩa vào đây, hoặc dùng nút + Nguồn/Đích." : "Chưa gán."}
+          {onDropDisk ? "Chưa gán -- kéo một ổ đĩa vào đây." : "Chưa gán."}
+          {onDropDisk && (
+            <span className="mt-2 flex justify-center">
+              <IconButton
+                aria-label={`Thêm ${title}`}
+                title={`Thêm ${title}`}
+                icon={<Plus className="h-4 w-4" />}
+                onClick={handleAddViaPicker}
+              />
+            </span>
+          )}
         </EmptyState>
       )}
       <ul className="flex flex-col gap-2">
@@ -128,92 +210,110 @@ export function EndpointList({
                 setReorderOverId(null);
                 onReorder(fromDiskId, endpoint.diskId);
               }}
-              title={onReorder ? "Kéo để sắp thứ tự -- thứ tự này là thứ tự chuyển tiếp Nối tiếp (Cascade)" : undefined}
-              className={`flex flex-col gap-2 rounded border px-3 py-2 ${
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, diskId: endpoint.diskId });
+              }}
+              title="Kéo để sắp thứ tự (Nối tiếp), hoặc chuột phải để xem thêm thao tác"
+              className={`group relative flex items-center gap-2 rounded border px-3 py-2 ${
                 reorderOverId === endpoint.diskId
                   ? "border-blue-500 bg-blue-500/10"
                   : "border-neutral-800 bg-neutral-900"
               } ${onReorder ? "cursor-grab active:cursor-grabbing" : ""}`}
             >
-              <div className="flex items-center gap-2">
-                {onReorder && (
-                  <span className="shrink-0 text-neutral-600" aria-hidden="true">
-                    {index + 1}.
-                  </span>
-                )}
-                <div className="relative shrink-0">
-                  <DriveIcon removable={disk?.isRemovable} className="h-5 w-5 text-neutral-500" />
-                  {disk?.isRemovable && (
-                    <button
-                      type="button"
-                      disabled={ejecting[disk.id]}
-                      title={ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
-                      onClick={() => handleEject(disk)}
-                      className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-500 text-neutral-950 disabled:opacity-40"
-                    >
-                      <ArrowUpFromLine className="h-2 w-2" strokeWidth={3} />
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-col">
-                  <span className="font-medium">{disk?.name ?? endpoint.diskId}</span>
-                  <span className="text-xs text-neutral-500">
-                    {disk?.mountPoint ?? "(đã rút)"}
-                  </span>
-                  {disk && (
-                    <span className="text-[10px] text-neutral-600">
-                      {usageKind === "used"
-                        ? `${formatBytes(disk.totalBytes - disk.availableBytes)} đang dùng`
-                        : `${formatBytes(disk.availableBytes)} còn trống`}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  value={endpoint.label}
-                  onChange={(e) => onLabelChange(endpoint.diskId, e.currentTarget.value)}
-                  placeholder="Nhãn…"
-                  title={endpoint.isAutoLabel ? "Nhãn tự động" : "Nhãn"}
-                  autoComplete="off"
-                  className={`w-24 shrink-0 rounded-full px-2 py-1 text-center text-xs ${labelPillClass(endpoint)}`}
-                />
-                {onBrowse && (
-                  <Button
-                    variant="secondary"
-                    icon={<FolderOpen className="h-3.5 w-3.5" />}
-                    onClick={() => onBrowse(endpoint.path)}
-                  >
-                    Duyệt
-                  </Button>
-                )}
-                <Button
-                  variant="danger"
-                  icon={<Trash2 className="h-3.5 w-3.5" />}
-                  onClick={() => onRemove(endpoint.diskId)}
-                >
-                  Xóa
-                </Button>
-              </div>
-              {ejectError[endpoint.diskId] && (
-                <p className="text-[10px] text-red-400">{ejectError[endpoint.diskId]}</p>
-              )}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-500">
-                  Đường dẫn thư mục
+              {onReorder && (
+                <span className="shrink-0 text-neutral-600" aria-hidden="true">
+                  {index + 1}.
                 </span>
-                <input
-                  value={endpoint.path}
-                  onChange={(e) => onPathChange(endpoint.diskId, e.currentTarget.value)}
-                  placeholder="Đường dẫn thư mục đầy đủ…"
-                  autoComplete="off"
-                  className="min-w-0 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
-                />
+              )}
+              <div className="relative shrink-0">
+                <DriveIcon removable={disk?.isRemovable} className="h-6 w-6 text-neutral-400" />
+                {disk?.isRemovable && (
+                  <button
+                    type="button"
+                    disabled={ejecting[disk.id]}
+                    title={ejecting[disk.id] ? "Đang tháo…" : "Tháo"}
+                    onClick={() => handleEject(disk)}
+                    className="absolute -right-1.5 -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-500 text-neutral-950 disabled:opacity-40"
+                  >
+                    <ArrowUpFromLine className="h-2 w-2" strokeWidth={3} />
+                  </button>
+                )}
               </div>
+              <div className="flex min-w-0 flex-1 flex-col">
+                {editingLabelDiskId === endpoint.diskId ? (
+                  <input
+                    autoFocus
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.currentTarget.value)}
+                    onBlur={() => commitLabelEdit(endpoint.diskId)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitLabelEdit(endpoint.diskId);
+                      if (e.key === "Escape") setEditingLabelDiskId(null);
+                    }}
+                    placeholder="Nhãn…"
+                    autoComplete="off"
+                    className="w-28 rounded border border-blue-600 bg-neutral-950 px-1 py-0.5 text-sm font-medium"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    title="Bấm để sửa nhãn"
+                    onClick={() => startEditingLabel(endpoint)}
+                    className={`w-fit truncate text-left font-medium hover:underline ${
+                      endpoint.label ? "" : "text-neutral-400"
+                    }`}
+                  >
+                    {endpoint.label ? (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs ${labelPillClass(endpoint)}`}
+                      >
+                        {endpoint.label}
+                      </span>
+                    ) : (
+                      (disk?.name ?? endpoint.diskId)
+                    )}
+                  </button>
+                )}
+                <span className="truncate text-xs text-neutral-500">
+                  {disk?.mountPoint ?? "(đã rút)"}
+                  {disk &&
+                    ` · ${
+                      usageKind === "used"
+                        ? `${formatBytes(disk.totalBytes - disk.availableBytes)} đang dùng`
+                        : `${formatBytes(disk.availableBytes)} còn trống`
+                    }`}
+                </span>
+                {ejectError[endpoint.diskId] && (
+                  <p className="text-[10px] text-red-400">{ejectError[endpoint.diskId]}</p>
+                )}
+              </div>
+              <IconButton
+                aria-label={`Thêm thao tác cho ${endpoint.label || disk?.name || endpoint.diskId}`}
+                title="Thêm thao tác"
+                icon={<MenuIcon className="h-3.5 w-3.5" />}
+                className="opacity-0 group-hover:opacity-100"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setContextMenu({ x: rect.right - 200, y: rect.bottom + 4, diskId: endpoint.diskId });
+                }}
+              />
             </li>
           );
         })}
       </ul>
+
+      {contextMenu && contextMenuEndpoint && (
+        <DiskContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildMenuItems(
+            contextMenuEndpoint,
+            disks.find((d) => d.id === contextMenu.diskId),
+          )}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </Panel>
   );
 }
