@@ -176,8 +176,13 @@ pub fn write_mhl(
         return Ok(None);
     }
     let dt: DateTime<Utc> = started_at.into();
-    let filename = format!("{}.mhl", dt.format("%Y%m%d_%H%M%S"));
-    let path = destination.join(filename);
+    let stem = dt.format("%Y%m%d_%H%M%S").to_string();
+    let mut path = destination.join(format!("{stem}.mhl"));
+    let mut counter = 2;
+    while path.exists() {
+        path = destination.join(format!("{stem}_{counter}.mhl"));
+        counter += 1;
+    }
     crate::atomic_file::write_atomic(
         &path,
         render_mhl(entries, started_at, finished_at).as_bytes(),
@@ -698,6 +703,22 @@ mod tests {
         let result = write_mhl(dir.path(), &[], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH).unwrap();
         assert!(result.is_none());
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn two_mhls_started_in_the_same_second_get_distinct_names() {
+        let dst_dir = tempfile::tempdir().unwrap();
+        let started = SystemTime::UNIX_EPOCH;
+        let first = write_mhl(dst_dir.path(), &[sample_entry()], started, started)
+            .unwrap()
+            .unwrap();
+        let second = write_mhl(dst_dir.path(), &[sample_entry()], started, started)
+            .unwrap()
+            .unwrap();
+
+        assert_ne!(first, second);
+        assert!(first.exists());
+        assert!(second.exists());
     }
 
     #[test]
