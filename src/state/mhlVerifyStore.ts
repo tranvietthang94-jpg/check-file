@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import { repairMhlEntry, verifyMhl, verifyMhlsInFolder } from "../lib/tauri";
-import type { MhlVerifyReport } from "../types/mhl";
+import { planMhlRepair, repairMhlEntry, verifyMhl, verifyMhlsInFolder } from "../lib/tauri";
+import type { MhlVerifyReport, RepairPlan } from "../types/mhl";
 
 interface MhlVerifyState {
   path: string;
@@ -8,12 +8,20 @@ interface MhlVerifyState {
   busy: boolean;
   reports: MhlVerifyReport[] | null;
   error: string | null;
+  repairPlan: RepairPlan | null;
+  selectedCandidateRoot: string | null;
+  manualCandidateRoot: string;
   setPath: (path: string) => void;
   setMode: (mode: "file" | "folder") => void;
   /** Runs a verify for the given path/mode (or whatever's already set, e.g.
    * from the panel's own inputs). Used both by the panel's Verify button and
    * by a disk's right-click "Verify" context-menu action. */
   runVerify: (path?: string, mode?: "file" | "folder") => Promise<void>;
+  planRepair: (mhlPath: string, relativePath: string, candidateRoots: string[]) => Promise<void>;
+  closeRepairPlan: () => void;
+  setManualCandidateRoot: (root: string) => void;
+  selectCandidateRoot: (root: string) => void;
+  repairSelected: () => Promise<void>;
   repairEntry: (mhlPath: string, relativePath: string, sourceRoot: string) => Promise<void>;
 }
 
@@ -23,9 +31,42 @@ export const useMhlVerifyStore = create<MhlVerifyState>((set, get) => ({
   busy: false,
   reports: null,
   error: null,
+  repairPlan: null,
+  selectedCandidateRoot: null,
+  manualCandidateRoot: "",
 
   setPath: (path) => set({ path }),
   setMode: (mode) => set({ mode }),
+  setManualCandidateRoot: (manualCandidateRoot) => set({ manualCandidateRoot }),
+  selectCandidateRoot: (selectedCandidateRoot) => set({ selectedCandidateRoot }),
+  closeRepairPlan: () =>
+    set({ repairPlan: null, selectedCandidateRoot: null, manualCandidateRoot: "", error: null }),
+
+  planRepair: async (mhlPath, relativePath, candidateRoots) => {
+    const manual = get().manualCandidateRoot.trim();
+    const roots = [...candidateRoots, ...(manual ? [manual] : [])].filter(
+      (root, index, all) => root.trim() && all.indexOf(root) === index,
+    );
+    set({ busy: true, error: null, repairPlan: null, selectedCandidateRoot: null });
+    try {
+      const repairPlan = await planMhlRepair(mhlPath, relativePath, roots);
+      set({
+        repairPlan,
+        selectedCandidateRoot: repairPlan.candidates[0]?.root ?? null,
+        busy: false,
+      });
+    } catch (err) {
+      set({ error: String(err), busy: false });
+    }
+  },
+
+  repairSelected: async () => {
+    const plan = get().repairPlan;
+    const root = get().selectedCandidateRoot;
+    if (!plan || !root) return;
+    await get().repairEntry(plan.mhlPath, plan.relativePath, root);
+    if (!get().error) get().closeRepairPlan();
+  },
 
   repairEntry: async (mhlPath, relativePath, sourceRoot) => {
     set({ busy: true, error: null });

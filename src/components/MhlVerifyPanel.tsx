@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useMhlVerifyStore } from "../state/mhlVerifyStore";
+import { useTransferLogStore } from "../state/transferLogStore";
 import { Panel } from "./ui/Panel";
 import { SectionHeading } from "./ui/SectionHeading";
 import { EmptyState } from "./ui/EmptyState";
@@ -59,7 +61,7 @@ function ReportCard({
                   onClick={() => onRepair(r.relativePath)}
                   className="w-fit px-1.5 py-0.5 text-[10px]"
                 >
-                  Sửa
+                  Lập kế hoạch sửa
                 </Button>
               )}
             </span>
@@ -79,13 +81,30 @@ export function MhlVerifyPanel() {
   const setPath = useMhlVerifyStore((s) => s.setPath);
   const setMode = useMhlVerifyStore((s) => s.setMode);
   const runVerify = useMhlVerifyStore((s) => s.runVerify);
-  const repairEntry = useMhlVerifyStore((s) => s.repairEntry);
+  const repairPlan = useMhlVerifyStore((s) => s.repairPlan);
+  const selectedCandidateRoot = useMhlVerifyStore((s) => s.selectedCandidateRoot);
+  const manualCandidateRoot = useMhlVerifyStore((s) => s.manualCandidateRoot);
+  const planRepair = useMhlVerifyStore((s) => s.planRepair);
+  const closeRepairPlan = useMhlVerifyStore((s) => s.closeRepairPlan);
+  const setManualCandidateRoot = useMhlVerifyStore((s) => s.setManualCandidateRoot);
+  const selectCandidateRoot = useMhlVerifyStore((s) => s.selectCandidateRoot);
+  const repairSelected = useMhlVerifyStore((s) => s.repairSelected);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as Window & { __OFFLOADKIT_MHL_TEST__?: (report: MhlVerifyReport) => void })
+      .__OFFLOADKIT_MHL_TEST__ = (report) => useMhlVerifyStore.setState({ reports: [report] });
+    return () => {
+      delete (window as Window & { __OFFLOADKIT_MHL_TEST__?: unknown }).__OFFLOADKIT_MHL_TEST__;
+    };
+  }, []);
 
   const requestRepair = (report: MhlVerifyReport, relativePath: string) => {
-    const sourceRoot = window.prompt("Thư mục chứa bản gốc đã xác minh:");
-    if (!sourceRoot?.trim()) return;
-    if (!window.confirm(`Thay ${relativePath} bằng bản đã xác minh và giữ bản lỗi làm evidence?`)) return;
-    void repairEntry(report.mhlPath, relativePath, sourceRoot.trim());
+    const logs = useTransferLogStore.getState().logs;
+    const roots = logs
+      .filter((log) => log.mhlPath === report.mhlPath || report.mhlPath.startsWith(log.destination))
+      .flatMap((log) => [log.source, log.destination]);
+    void planRepair(report.mhlPath, relativePath, roots);
   };
 
   return (
@@ -131,6 +150,64 @@ export function MhlVerifyPanel() {
       </div>
 
       {error && <p className="text-[10px] text-red-400">{error}</p>}
+
+      {repairPlan && (
+        <Panel className="flex flex-col gap-2 p-3" data-testid="repair-plan">
+          <div className="flex items-center justify-between gap-2">
+            <SectionHeading as="h3">Kế hoạch sửa: {repairPlan.relativePath}</SectionHeading>
+            <Button variant="ghost" onClick={closeRepairPlan}>Đóng</Button>
+          </div>
+          <p className="text-[10px] text-neutral-500">
+            Chỉ các bản có checksum {repairPlan.algorithm.toUpperCase()} khớp MHL mới được hiển thị.
+          </p>
+          {repairPlan.candidates.length === 0 ? (
+            <EmptyState icon={<ShieldCheck className="h-5 w-5" />}>Không tìm thấy bản đã xác minh. Thêm một thư mục ứng viên rồi lập lại kế hoạch.</EmptyState>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {repairPlan.candidates.map((candidate) => (
+                <label key={candidate.root} className="flex items-start gap-2 rounded border border-neutral-800 p-2 text-xs">
+                  <input
+                    type="radio"
+                    name="repair-candidate"
+                    checked={selectedCandidateRoot === candidate.root}
+                    onChange={() => selectCandidateRoot(candidate.root)}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-mono">{candidate.root}</span>
+                    <span className="block truncate text-[10px] text-green-500">{candidate.checksum}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input
+              aria-label="Thư mục ứng viên sửa"
+              value={manualCandidateRoot}
+              onChange={(e) => setManualCandidateRoot(e.currentTarget.value)}
+              placeholder="Thêm thư mục Source hoặc Destination khác…"
+              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+            />
+            <Button
+              variant="secondary"
+              disabled={!manualCandidateRoot.trim() || busy}
+              onClick={() => planRepair(repairPlan.mhlPath, repairPlan.relativePath, [manualCandidateRoot.trim()])}
+            >
+              Tìm lại
+            </Button>
+          </div>
+          <Button
+            disabled={!selectedCandidateRoot || busy}
+            onClick={() => {
+              if (window.confirm(`Thay ${repairPlan.relativePath} và giữ bản lỗi làm evidence?`)) {
+                void repairSelected();
+              }
+            }}
+          >
+            Xác nhận sửa
+          </Button>
+        </Panel>
+      )}
 
       {reports && (
         <div className="flex flex-col gap-2">

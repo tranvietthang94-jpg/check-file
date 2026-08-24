@@ -15,7 +15,7 @@ import type { MediaScanCompletePayload, MediaScanItemPayload } from "../types/me
 import type { OrganizeSettings } from "../types/organize";
 import type { Preset } from "../types/preset";
 import type { ReportRequest } from "../types/report";
-import type { MhlVerifyReport } from "../types/mhl";
+import type { MhlVerifyReport, RepairPlan } from "../types/mhl";
 import type { TransferLogEntry } from "../types/transferLog";
 import type { QueueMode } from "../types/queue";
 
@@ -169,6 +169,14 @@ export function generateReport(request: ReportRequest): Promise<string> {
 /** Verifies one .mhl file against the real files on disk, without a transfer. */
 export function verifyMhl(path: string): Promise<MhlVerifyReport> {
   return invoke<MhlVerifyReport>("verify_mhl", { path });
+}
+
+export function planMhlRepair(
+  mhlPath: string,
+  relativePath: string,
+  candidateRoots: string[],
+): Promise<RepairPlan> {
+  return invoke<RepairPlan>("plan_mhl_repair", { mhlPath, relativePath, candidateRoots });
 }
 
 export function repairMhlEntry(

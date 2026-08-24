@@ -489,6 +489,99 @@ fn verify_entry_against_disk(entry: &ParsedMhlEntry, root: &Path) -> MhlEntrySta
     }
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairCandidate {
+    pub root: String,
+    pub path: String,
+    pub checksum: String,
+    pub algorithm: ChecksumAlgorithm,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepairPlan {
+    pub mhl_path: String,
+    pub relative_path: String,
+    pub expected_checksum: String,
+    pub algorithm: ChecksumAlgorithm,
+    pub candidates: Vec<RepairCandidate>,
+}
+
+pub fn plan_mhl_repair(
+    mhl_path: &Path,
+    relative_path: &Path,
+    candidate_roots: &[PathBuf],
+) -> io::Result<RepairPlan> {
+    if !is_safe_relative_path(relative_path) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "repair path must stay inside its roots",
+        ));
+    }
+    let xml = fs::read_to_string(mhl_path)?;
+    let entries = parse_mhl(&xml)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let entry = entries
+        .into_iter()
+        .find(|entry| Path::new(&entry.relative_path) == relative_path)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file is not recorded in the MHL"))?;
+    let algorithm = entry
+        .algorithm
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MHL entry has no checksum"))?;
+    let expected_checksum = entry
+        .checksum
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MHL entry has no checksum"))?;
+    let destination = mhl_path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(relative_path);
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates = Vec::new();
+
+    for root in candidate_roots {
+        let key = root.to_string_lossy().to_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        let candidate = match crate::path_safety::safe_destination(root, relative_path) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        if candidate == destination {
+            continue;
+        }
+        let Ok(meta) = fs::metadata(&candidate) else {
+            continue;
+        };
+        if meta.len() != entry.size {
+            continue;
+        }
+        if crate::path_safety::revalidate_destination(root, &candidate).is_err() {
+            continue;
+        }
+        let Ok(actual) = checksum::hash_file(&candidate, algorithm) else {
+            continue;
+        };
+        if actual.eq_ignore_ascii_case(&expected_checksum) {
+            candidates.push(RepairCandidate {
+                root: root.display().to_string(),
+                path: candidate.display().to_string(),
+                checksum: actual,
+                algorithm,
+            });
+        }
+    }
+
+    Ok(RepairPlan {
+        mhl_path: mhl_path.display().to_string(),
+        relative_path: relative_path.display().to_string(),
+        expected_checksum,
+        algorithm,
+        candidates,
+    })
+}
+
 pub fn repair_mhl_entry(
     destination_root: &Path,
     relative_path: &Path,
@@ -636,6 +729,88 @@ mod tests {
             legacy_checksum: None,
             legacy_algorithm: None,
         }
+    }
+
+    #[test]
+    fn plan_repair_returns_only_checksum_verified_candidates_without_mutating_destination() {
+        let destination = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        fs::write(destination.path().join("clip.mov"), b"broken").unwrap();
+        fs::write(source.path().join("clip.mov"), b"good footage").unwrap();
+        let expected = checksum::hash_file(
+            &source.path().join("clip.mov"),
+            ChecksumAlgorithm::Xxh64,
+        )
+        .unwrap();
+        let entry = MhlFileEntry {
+            relative_path: "clip.mov".to_string(),
+            size: 12,
+            modified: SystemTime::UNIX_EPOCH,
+            checksum: Some(expected.clone()),
+            algorithm: ChecksumAlgorithm::Xxh64,
+            hashed_at: SystemTime::UNIX_EPOCH,
+            legacy_checksum: None,
+            legacy_algorithm: None,
+        };
+        let mhl_path = write_mhl(
+            destination.path(),
+            &[entry],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+        .unwrap();
+
+        let plan = plan_mhl_repair(
+            &mhl_path,
+            Path::new("clip.mov"),
+            &[source.path().to_path_buf()],
+        )
+        .unwrap();
+
+        assert_eq!(plan.candidates.len(), 1);
+        assert_eq!(plan.candidates[0].checksum, expected);
+        assert_eq!(fs::read(destination.path().join("clip.mov")).unwrap(), b"broken");
+    }
+
+    #[test]
+    fn plan_repair_rejects_same_size_wrong_checksum_and_unsafe_paths() {
+        let destination = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        fs::write(source.path().join("clip.mov"), b"wrong footage").unwrap();
+        let entry = MhlFileEntry {
+            relative_path: "clip.mov".to_string(),
+            size: 13,
+            modified: SystemTime::UNIX_EPOCH,
+            checksum: Some("0000000000000000".to_string()),
+            algorithm: ChecksumAlgorithm::Xxh64,
+            hashed_at: SystemTime::UNIX_EPOCH,
+            legacy_checksum: None,
+            legacy_algorithm: None,
+        };
+        let mhl_path = write_mhl(
+            destination.path(),
+            &[entry],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(plan_mhl_repair(
+            &mhl_path,
+            Path::new("clip.mov"),
+            &[source.path().to_path_buf()],
+        )
+        .unwrap()
+        .candidates
+        .is_empty());
+        assert!(plan_mhl_repair(
+            &mhl_path,
+            Path::new("../clip.mov"),
+            &[source.path().to_path_buf()],
+        )
+        .is_err());
     }
 
     #[test]

@@ -140,6 +140,21 @@ pub fn verify_mhl(path: String) -> Result<MhlVerifyReport, String> {
 }
 
 #[tauri::command]
+pub fn plan_mhl_repair(
+    mhl_path: String,
+    relative_path: String,
+    candidate_roots: Vec<String>,
+) -> Result<mhl::RepairPlan, String> {
+    let roots: Vec<PathBuf> = candidate_roots.into_iter().map(PathBuf::from).collect();
+    mhl::plan_mhl_repair(
+        &PathBuf::from(mhl_path),
+        &PathBuf::from(relative_path),
+        &roots,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn repair_mhl_entry(
     mhl_path: String,
     relative_path: String,

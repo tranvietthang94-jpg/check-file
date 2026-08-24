@@ -46,6 +46,7 @@ pub fn run() {
             commands::set_queue_mode,
             commands::generate_report,
             commands::verify_mhl,
+            commands::plan_mhl_repair,
             commands::repair_mhl_entry,
             commands::verify_mhls_in_folder
         ])
