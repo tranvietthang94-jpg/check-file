@@ -72,6 +72,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<Record<string, string>>({});
   const contextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
+  const labelReturnFocusRef = useRef<Record<string, HTMLButtonElement | null>>({});
 
   // Renames the actual OS volume (Win32 SetVolumeLabelW / macOS `diskutil
   // rename`) -- distinct from the app-only "Label" above, which never
@@ -314,7 +315,10 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                     onBlur={() => commitLabelEdit(disk.id)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") commitLabelEdit(disk.id);
-                      if (e.key === "Escape") setEditingLabelDiskId(null);
+                      if (e.key === "Escape") {
+                        setEditingLabelDiskId(null);
+                        requestAnimationFrame(() => labelReturnFocusRef.current[disk.id]?.focus());
+                      }
                     }}
                     placeholder="Nhãn…"
                     autoComplete="off"
@@ -323,6 +327,9 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                 ) : (
                   <button
                     type="button"
+                    ref={(node) => {
+                      labelReturnFocusRef.current[disk.id] = node;
+                    }}
                     title="Bấm để thêm/sửa nhãn -- đặt ổ đĩa này làm Nguồn"
                     onClick={(e) => {
                       e.stopPropagation();
