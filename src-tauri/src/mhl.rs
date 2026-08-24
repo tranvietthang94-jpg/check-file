@@ -153,7 +153,7 @@ pub fn write_per_file_mhls(
         };
         let mhl_path = parent.join(format!("{}.mhl", file_name.to_string_lossy()));
         let xml = render_mhl(std::slice::from_ref(entry), started_at, finished_at);
-        if fs::write(&mhl_path, xml).is_ok() {
+        if crate::atomic_file::write_atomic(&mhl_path, xml.as_bytes()).is_ok() {
             written.push(mhl_path);
         }
     }
@@ -176,7 +176,10 @@ pub fn write_mhl(
     let dt: DateTime<Utc> = started_at.into();
     let filename = format!("{}.mhl", dt.format("%Y%m%d_%H%M%S"));
     let path = destination.join(filename);
-    fs::write(&path, render_mhl(entries, started_at, finished_at))?;
+    crate::atomic_file::write_atomic(
+        &path,
+        render_mhl(entries, started_at, finished_at).as_bytes(),
+    )?;
     Ok(Some(path))
 }
 
@@ -519,6 +522,22 @@ mod tests {
         let xml = render_mhl(&[entry], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH);
         assert!(xml.contains("A &amp; B &lt;clip&gt;.MP4"));
         assert!(!xml.contains("A & B <clip>.MP4"));
+    }
+
+    #[test]
+    fn write_mhl_leaves_no_temporary_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_mhl(
+            dir.path(),
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(path.is_file());
+        assert!(!path.with_file_name(format!("{}.tmp", path.file_name().unwrap().to_string_lossy())).exists());
     }
 
     #[test]

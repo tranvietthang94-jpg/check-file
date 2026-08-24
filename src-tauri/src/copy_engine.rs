@@ -514,6 +514,7 @@ fn copy_file_chunked(
     // second offload of the same card instead of recognizing it as already
     // copied.
     let _ = dst_file.set_modified(source_modified);
+    dst_file.sync_all()?;
 
     Ok(CopyFileOutcome::Completed {
         source_hash: hasher.map(|h| h.finalize_hex()),
@@ -1247,6 +1248,28 @@ mod tests {
     impl ProgressSink for NoopSink {
         fn on_scan(&self, _total_files: u64, _total_bytes: u64) {}
         fn on_progress(&self, _payload: ProgressPayload) {}
+    }
+
+    #[test]
+    fn source_scan_ignores_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("outside.mov"), b"must not copy").unwrap();
+        fs::write(dir.path().join("inside.mov"), b"copy me").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path().join("outside.mov"), dir.path().join("link.mov"))
+            .unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(
+            outside.path().join("outside.mov"),
+            dir.path().join("link.mov"),
+        )
+        .unwrap();
+
+        let entries = scan_source(dir.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].relative, Path::new("inside.mov"));
     }
 
     #[test]

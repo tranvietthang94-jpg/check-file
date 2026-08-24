@@ -66,7 +66,7 @@ pub fn save_log_to_dir(dir: &Path, entry: &TransferLogEntry) -> io::Result<()> {
     let path = dir.join(format!("{}.json", entry.job_id));
     let json = serde_json::to_string_pretty(entry)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-    fs::write(path, json)
+    crate::atomic_file::write_atomic(&path, json.as_bytes())
 }
 
 /// Newest-first, since that's how a log viewer wants to present history.
@@ -134,6 +134,26 @@ mod tests {
             mhl_path: Some("D:\\Offload\\20260703_200005.mhl".to_string()),
             cancelled: false,
         }
+    }
+
+    #[test]
+    fn atomic_log_write_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        save_log_to_dir(dir.path(), &sample_entry("atomic", "2026-07-03T00:00:00Z")).unwrap();
+
+        assert!(dir.path().join("atomic.json").is_file());
+        assert!(!dir.path().join("atomic.json.tmp").exists());
+    }
+
+    #[test]
+    fn atomic_log_write_replaces_an_existing_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("atomic.json");
+        fs::write(&path, "old incomplete data").unwrap();
+        save_log_to_dir(dir.path(), &sample_entry("atomic", "2026-07-03T00:00:00Z")).unwrap();
+
+        let saved: TransferLogEntry = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(saved.job_id, "atomic");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+mod atomic_file;
 mod cascade;
 mod checksum;
 mod commands;
