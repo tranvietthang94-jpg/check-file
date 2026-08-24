@@ -25,3 +25,6 @@ dist-ssr
 *.sw?
 
 .worktrees/
+
+/test-results/
+/playwright-report/
