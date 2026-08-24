@@ -1,7 +1,7 @@
 export type JobStatus = "queued" | "copying" | "complete" | "cancelled";
 
 export type VerificationMode = "transfer" | "source" | "sourceAndDestination";
-export type ChecksumAlgorithm = "xxh64" | "md5" | "sha1" | "c4";
+export type ChecksumAlgorithm = "xxh64" | "xxh3" | "xxh128" | "md5" | "sha1" | "c4";
 
 export interface FailedFile {
   path: string;

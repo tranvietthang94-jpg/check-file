@@ -48,6 +48,8 @@ pub(crate) fn iso8601(t: SystemTime) -> String {
 fn hash_tag(algorithm: ChecksumAlgorithm) -> &'static str {
     match algorithm {
         ChecksumAlgorithm::Xxh64 => "xxhash64be",
+        ChecksumAlgorithm::Xxh3 => "xxh3",
+        ChecksumAlgorithm::Xxh128 => "xxh128",
         ChecksumAlgorithm::Md5 => "md5",
         ChecksumAlgorithm::Sha1 => "sha1",
         ChecksumAlgorithm::C4 => "c4",
@@ -199,7 +201,9 @@ pub struct ParsedMhlEntry {
 
 fn algorithm_for_hash_tag(tag: &str) -> Option<ChecksumAlgorithm> {
     match tag {
-        "xxhash64be" => Some(ChecksumAlgorithm::Xxh64),
+        "xxhash64be" | "xxh64" => Some(ChecksumAlgorithm::Xxh64),
+        "xxh3" => Some(ChecksumAlgorithm::Xxh3),
+        "xxh128" => Some(ChecksumAlgorithm::Xxh128),
         "md5" => Some(ChecksumAlgorithm::Md5),
         "sha1" => Some(ChecksumAlgorithm::Sha1),
         _ => None,
@@ -228,6 +232,7 @@ pub fn parse_mhl(xml: &str) -> quick_xml::Result<Vec<ParsedMhlEntry>> {
     let mut entries = Vec::new();
     let mut in_hash = false;
     let mut current_tag: Option<String> = None;
+    let mut current_path_attributes: Option<(u64, SystemTime)> = None;
     // Text content accumulates across `Text` and `GeneralRef` events -- since
     // quick-xml 0.41 splits an entity reference like `&lt;` out of the
     // surrounding text into its own event, a single element's content can
@@ -252,8 +257,24 @@ pub fn parse_mhl(xml: &str) -> quick_xml::Result<Vec<ParsedMhlEntry>> {
                     checksum = None;
                     algorithm = None;
                 } else if in_hash {
-                    current_tag = Some(name);
+                    current_tag = Some(name.clone());
                     current_text.clear();
+                    if name == "path" {
+                        let mut path_size = None;
+                        let mut path_modified = None;
+                        for attribute in e.attributes().flatten() {
+                            match attribute.key.as_ref() {
+                                b"size" => {
+                                    path_size = String::from_utf8_lossy(&attribute.value).parse().ok()
+                                }
+                                b"lastmodificationdate" => {
+                                    path_modified = parse_iso8601(&String::from_utf8_lossy(&attribute.value))
+                                }
+                                _ => {}
+                            }
+                        }
+                        current_path_attributes = path_size.zip(path_modified);
+                    }
                 }
             }
             Event::Text(t) => {
@@ -297,6 +318,13 @@ pub fn parse_mhl(xml: &str) -> quick_xml::Result<Vec<ParsedMhlEntry>> {
                 } else if in_hash {
                     match name.as_str() {
                         "file" => file = Some(std::mem::take(&mut current_text)),
+                        "path" => {
+                            file = Some(std::mem::take(&mut current_text));
+                            if let Some((path_size, path_modified)) = current_path_attributes.take() {
+                                size = Some(path_size);
+                                modified = Some(path_modified);
+                            }
+                        }
                         "size" => size = current_text.parse().ok(),
                         "lastmodificationdate" => modified = parse_iso8601(&current_text),
                         other => {
@@ -569,6 +597,22 @@ mod tests {
             legacy_checksum: None,
             legacy_algorithm: None,
         }
+    }
+
+    #[test]
+    fn parses_asc_mhl_v2_xxh128_fixture_shape() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<hashlist version="2.0" xmlns="urn:ASC:MHL:v2.0">
+  <hashes><hash>
+    <path size="5" lastmodificationdate="2020-01-15T13:00:00Z">clip.mov</path>
+    <xxh128 action="original" hashdate="2020-01-16T09:15:00Z">99aa06d3014798d86001c324468d497f</xxh128>
+  </hash></hashes>
+</hashlist>"#;
+        let entries = parse_mhl(xml).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].relative_path, "clip.mov");
+        assert_eq!(entries[0].size, 5);
+        assert_eq!(entries[0].algorithm, Some(ChecksumAlgorithm::Xxh128));
     }
 
     #[test]

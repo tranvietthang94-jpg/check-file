@@ -6,12 +6,15 @@ use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest as _, Sha512};
+use xxhash_rust::xxh3::Xxh3;
 use xxhash_rust::xxh64::Xxh64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChecksumAlgorithm {
     Xxh64,
+    Xxh3,
+    Xxh128,
     Md5,
     Sha1,
     /// OffShoot's legacy "C4" option: a SHA-512 digest re-encoded as a C4 ID
@@ -30,6 +33,8 @@ impl Default for ChecksumAlgorithm {
 /// streamed for copying, instead of requiring a second read pass.
 pub enum StreamingHasher {
     Xxh64(Xxh64),
+    Xxh3(Xxh3),
+    Xxh128(Xxh3),
     Md5(Md5),
     Sha1(Sha1),
     C4(Sha512),
@@ -39,6 +44,8 @@ impl StreamingHasher {
     pub fn new(algorithm: ChecksumAlgorithm) -> Self {
         match algorithm {
             ChecksumAlgorithm::Xxh64 => StreamingHasher::Xxh64(Xxh64::new(0)),
+            ChecksumAlgorithm::Xxh3 => StreamingHasher::Xxh3(Xxh3::new()),
+            ChecksumAlgorithm::Xxh128 => StreamingHasher::Xxh128(Xxh3::new()),
             ChecksumAlgorithm::Md5 => StreamingHasher::Md5(Md5::new()),
             ChecksumAlgorithm::Sha1 => StreamingHasher::Sha1(Sha1::new()),
             ChecksumAlgorithm::C4 => StreamingHasher::C4(Sha512::new()),
@@ -48,6 +55,7 @@ impl StreamingHasher {
     pub fn update(&mut self, data: &[u8]) {
         match self {
             StreamingHasher::Xxh64(h) => h.update(data),
+            StreamingHasher::Xxh3(h) | StreamingHasher::Xxh128(h) => h.update(data),
             StreamingHasher::Md5(h) => h.update(data),
             StreamingHasher::Sha1(h) => h.update(data),
             StreamingHasher::C4(h) => h.update(data),
@@ -62,6 +70,8 @@ impl StreamingHasher {
     pub fn finalize_hex(self) -> String {
         match self {
             StreamingHasher::Xxh64(h) => format!("{:016x}", h.digest()),
+            StreamingHasher::Xxh3(h) => format!("{:016x}", h.digest()),
+            StreamingHasher::Xxh128(h) => format!("{:032x}", h.digest128()),
             StreamingHasher::Md5(h) => hex::encode(h.finalize()),
             StreamingHasher::Sha1(h) => hex::encode(h.finalize()),
             StreamingHasher::C4(h) => c4_id_from_digest(&h.finalize()),
@@ -161,6 +171,20 @@ mod tests {
             hasher.finalize_hex(),
             "da39a3ee5e6b4b0d3255bfef95601890afd80709"
         );
+    }
+
+    #[test]
+    fn xxh3_matches_official_empty_input_vector() {
+        let mut hasher = StreamingHasher::new(ChecksumAlgorithm::Xxh3);
+        hasher.update(b"");
+        assert_eq!(hasher.finalize_hex(), "2d06800538d394c2");
+    }
+
+    #[test]
+    fn xxh128_matches_official_empty_input_vector() {
+        let mut hasher = StreamingHasher::new(ChecksumAlgorithm::Xxh128);
+        hasher.update(b"");
+        assert_eq!(hasher.finalize_hex(), "99aa06d3014798d86001c324468d497f");
     }
 
     #[test]

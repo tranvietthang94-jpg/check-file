@@ -18,6 +18,8 @@ const VERIFICATION_MODES: { value: VerificationMode; label: string; hint: string
 
 const ALGORITHMS: { value: ChecksumAlgorithm; label: string }[] = [
   { value: "xxh64", label: "XXH64" },
+  { value: "xxh3", label: "XXH3" },
+  { value: "xxh128", label: "XXH128" },
   { value: "md5", label: "MD5" },
   { value: "sha1", label: "SHA-1" },
   { value: "c4", label: "C4" },
