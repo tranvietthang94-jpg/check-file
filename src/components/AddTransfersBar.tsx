@@ -16,7 +16,7 @@ interface AddTransfersBarProps {
   sources: Endpoint[];
   destinations: Endpoint[];
   disks: DiskInfo[];
-  onAdd: (mode: TransferGroupMode, moveAfterTransfer: boolean) => void;
+  onAdd: (mode: TransferGroupMode, moveAfterTransfer: boolean) => Promise<void>;
   onClear: () => void;
 }
 
@@ -35,6 +35,7 @@ export function AddTransfersBar({
 }: AddTransfersBarProps) {
   const [mode, setMode] = useState<TransferGroupMode>("parallel");
   const [moveAfterTransfer, setMoveAfterTransfer] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const verificationMode = useSettingsStore((s) => s.verificationMode);
 
   if (sources.length === 0 || destinations.length === 0) return null;
@@ -69,9 +70,18 @@ export function AddTransfersBar({
           variant="primary"
           size="md"
           icon={<Plus className="h-4 w-4" />}
-          onClick={() => onAdd(mode, moveAfterTransfer && moveEligible)}
+          disabled={submitting}
+          onClick={async () => {
+            if (submitting) return;
+            setSubmitting(true);
+            try {
+              await onAdd(mode, moveAfterTransfer && moveEligible);
+            } finally {
+              setSubmitting(false);
+            }
+          }}
         >
-          Thêm {count} lượt truyền
+          {submitting ? "Đang thêm…" : `Thêm ${count} lượt truyền`}
         </Button>
       </div>
 

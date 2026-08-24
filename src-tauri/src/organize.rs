@@ -407,18 +407,15 @@ pub fn build_destination_path(relative: &Path, ctx: &TokenContext, settings: &Or
     };
 
     let joined = folder.join(file_name);
-    if joined.is_absolute() {
-        // Belt-and-suspenders: even if some future token slips an absolute-
-        // looking value through, never let the result escape the folder it
-        // was supposed to land in -- `destination.join(...)` on an absolute
-        // path silently discards the destination root entirely.
-        joined
-            .components()
-            .filter(|c| !matches!(c, Component::Prefix(_) | Component::RootDir))
-            .collect()
-    } else {
-        joined
-    }
+    joined
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(PathBuf::from(value)),
+            Component::CurDir => None,
+            Component::ParentDir => Some(PathBuf::from("_")),
+            Component::Prefix(_) | Component::RootDir => None,
+        })
+        .collect()
 }
 
 /// Extension match (pattern starts with `.`) or case-insensitive partial
@@ -689,6 +686,20 @@ mod tests {
             "C0001.MP4",
         );
         assert_eq!(name, "C0001.MP4");
+    }
+
+    #[test]
+    fn literal_parent_segments_cannot_escape_the_destination() {
+        let relative = PathBuf::from("C0001.MP4");
+        let settings = OrganizeSettings {
+            folder_template: Some("../../outside".to_string()),
+            ..Default::default()
+        };
+
+        let path = build_destination_path(&relative, &ctx(|_| {}), &settings);
+
+        assert!(!path.components().any(|component| matches!(component, Component::ParentDir)));
+        assert!(!path.is_absolute());
     }
 
     #[test]

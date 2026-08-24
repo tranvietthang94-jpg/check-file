@@ -386,7 +386,7 @@ function App() {
       job.sourceLabel,
       organize,
       false,
-      moveSameVolume,
+      false,
       effectiveLegacyChecksumAlgorithm,
       saveLogToDestination,
       createPerFileMhl,

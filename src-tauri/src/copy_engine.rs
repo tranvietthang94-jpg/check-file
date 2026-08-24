@@ -457,9 +457,9 @@ enum CopyFileOutcome {
 /// crashed attempt is silently overwritten by `fs::File::create` the next
 /// time the same destination path is attempted, so no separate cleanup pass
 /// is needed at job start.
-fn staging_path_for(dest_path: &Path) -> PathBuf {
+fn staging_path_for(dest_path: &Path, job_id: &str) -> PathBuf {
     let mut name = dest_path.file_name().unwrap_or_default().to_os_string();
-    name.push(".ofkit-partial");
+    name.push(format!(".{job_id}.ofkit-partial"));
     dest_path.with_file_name(name)
 }
 
@@ -674,7 +674,7 @@ pub fn run_copy_core(
     } else {
         HashMap::new()
     };
-    let mut tracker = ProgressTracker::new(sink, job_id, total_bytes, total_files);
+    let mut tracker = ProgressTracker::new(sink, job_id.clone(), total_bytes, total_files);
     let mut buffer = vec![0u8; CHUNK_SIZE];
     let mut failed_files = Vec::new();
     let mut verified_files = Vec::new();
@@ -904,7 +904,7 @@ pub fn run_copy_core(
             continue;
         }
 
-        let staging_path = staging_path_for(&dest_path);
+        let staging_path = staging_path_for(&dest_path, &job_id);
 
         let mut attempt = 1;
         let copy_result = loop {
@@ -1512,8 +1512,13 @@ mod tests {
         // Simulates the app being killed mid-copy on a previous run: a
         // half-written staging file left behind under the same name this
         // run will also pick for its own staging path.
-        fs::write(dst_dir.path().join("clip.mov.ofkit-partial"), b"GARBAGE-FROM-A-CRASHED-RUN")
-            .unwrap();
+        fs::write(
+            dst_dir
+                .path()
+                .join("clip.mov.job-stale-staging.ofkit-partial"),
+            b"GARBAGE-FROM-A-CRASHED-RUN",
+        )
+        .unwrap();
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -1537,7 +1542,10 @@ mod tests {
             b"camera footage",
             "a stale leftover staging file must not corrupt or block a fresh retry"
         );
-        assert!(!dst_dir.path().join("clip.mov.ofkit-partial").exists());
+        assert!(!dst_dir
+            .path()
+            .join("clip.mov.job-stale-staging.ofkit-partial")
+            .exists());
     }
 
     #[test]
