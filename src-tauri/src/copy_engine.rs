@@ -1266,37 +1266,10 @@ pub fn run_copy_job<R: Runtime>(
     );
     let finished_at = SystemTime::now();
 
-    if outcome.cancelled {
-        let _ = app_handle.emit(
-            CANCELLED_EVENT,
-            CancelledPayload {
-                job_id: job_id.clone(),
-            },
-        );
-    } else {
-        let _ = app_handle.emit(
-            COMPLETE_EVENT,
-            CompletePayload {
-                job_id: job_id.clone(),
-                files_copied: outcome.files_copied,
-                bytes_copied: outcome.bytes_copied,
-                failed_files: outcome.failed_files.clone(),
-                verified_files: outcome.verified_files.clone(),
-                skipped_files: outcome.skipped_files.clone(),
-                renamed_files: outcome.renamed_files.clone(),
-                deleted_source_files: outcome.deleted_source_files.clone(),
-                move_delete_failed: outcome.move_delete_failed.clone(),
-                broken_media_files: outcome.broken_media_files.clone(),
-                missing_files: outcome.missing_files.clone(),
-            },
-        );
-    }
-
-    // Recorded either way (Stop & Resume): even a Stopped job already has
-    // real, verified work worth an audit trail and an MHL for what it did
-    // manage to copy -- Resume is just a fresh job over the same
-    // source/destination afterward, relying on Duplicate Detection (and,
-    // when the algorithm matches, MHL Awareness) to skip what's already here.
+    // Persist the MHL and transfer log before announcing completion. Consumers
+    // such as Auto Eject may act immediately on COMPLETE_EVENT, so emitting it
+    // earlier could unmount the source/destination while the audit trail was
+    // still being written.
     let mhl_path = mhl::write_mhl(&destination, &outcome.mhl_entries, started_at, finished_at)
         .ok()
         .flatten()
@@ -1334,6 +1307,32 @@ pub fn run_copy_job<R: Runtime>(
     // the destination root, mirroring where the MHL already always lands.
     if save_log_to_destination {
         let _ = transfer_log::save_log_to_dir(&destination, &log_entry);
+    }
+
+    if outcome.cancelled {
+        let _ = app_handle.emit(
+            CANCELLED_EVENT,
+            CancelledPayload {
+                job_id: job_id.clone(),
+            },
+        );
+    } else {
+        let _ = app_handle.emit(
+            COMPLETE_EVENT,
+            CompletePayload {
+                job_id: job_id.clone(),
+                files_copied: outcome.files_copied,
+                bytes_copied: outcome.bytes_copied,
+                failed_files: outcome.failed_files.clone(),
+                verified_files: outcome.verified_files.clone(),
+                skipped_files: outcome.skipped_files.clone(),
+                renamed_files: outcome.renamed_files.clone(),
+                deleted_source_files: outcome.deleted_source_files.clone(),
+                move_delete_failed: outcome.move_delete_failed.clone(),
+                broken_media_files: outcome.broken_media_files.clone(),
+                missing_files: outcome.missing_files.clone(),
+            },
+        );
     }
 
     app_handle.state::<JobRegistry>().remove(&job_id);

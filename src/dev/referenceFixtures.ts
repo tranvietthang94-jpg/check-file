@@ -74,6 +74,25 @@ export const referenceJobs: Record<string, TransferJob> = {
   }),
 };
 
+export const autoEjectJobs: Record<string, TransferJob> = {
+  complete: job("auto-eject-complete", "complete", {
+    groupId: "auto-eject-group",
+    sourcePath: "D:\\",
+    bytesCopied: 100_000_000,
+    filesCopied: 10,
+  }),
+};
+
+export const autoEjectGroups: Record<string, TransferGroup> = {
+  "auto-eject-group": {
+    id: "auto-eject-group",
+    mode: "parallel",
+    sourceLabel: "KHANH VAN",
+    destinationLabels: ["DATA"],
+    jobIds: ["auto-eject-complete"],
+  },
+};
+
 export const referenceGroups: Record<string, TransferGroup> = {
   "fixture-group": {
     id: "fixture-group",
@@ -84,8 +103,8 @@ export const referenceGroups: Record<string, TransferGroup> = {
   },
 };
 
-export function referenceFixture(): "disks" | "transfers" | null {
+export function referenceFixture(): "disks" | "transfers" | "autoEject" | null {
   if (!import.meta.env.DEV) return null;
   const fixture = new URLSearchParams(window.location.search).get("referenceFixture");
-  return fixture === "disks" || fixture === "transfers" ? fixture : null;
+  return fixture === "disks" || fixture === "transfers" || fixture === "autoEject" ? fixture : null;
 }

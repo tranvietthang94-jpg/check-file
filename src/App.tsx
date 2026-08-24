@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   cancelCopy,
   getVolumeSignature,
+  ejectDisk,
   listDisks,
   onBrokenMediaDetected,
   onCopyCancelled,
@@ -47,6 +48,8 @@ import type { TransferJob } from "./types/job";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/media";
 import {
+  autoEjectGroups,
+  autoEjectJobs,
   referenceDestinations,
   referenceDisks,
   referenceFixture,
@@ -61,6 +64,11 @@ function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
   return endpoint.label || disk?.name || endpoint.diskId;
 }
 
+function wildcardMatches(value: string, pattern: string): boolean {
+  const escaped = pattern.trim().replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return escaped !== "" && new RegExp(`^${escaped}$`, "i").test(value);
+}
+
 function App() {
   const [view, setView] = useState<"disks" | "transfers">("disks");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -69,6 +77,7 @@ function App() {
   const [reportsOpen, setReportsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [startTransferError, setStartTransferError] = useState<string | null>(null);
+  const autoEjectedGroups = useRef(new Set<string>());
   // Matches OffShoot's own hamburger menu -- Transfer Logs/Reports/Settings
   // open as their own windows from here rather than living permanently
   // stacked in the Transfers view.
@@ -122,6 +131,9 @@ function App() {
   const effectiveLegacyChecksumAlgorithm = legacyChecksumEnabled ? legacyChecksumAlgorithm : null;
   const saveLogToDestination = useSettingsStore((s) => s.saveLogToDestination);
   const createPerFileMhl = useSettingsStore((s) => s.createPerFileMhl);
+  const autoSourceEnabled = useSettingsStore((s) => s.autoSourceEnabled);
+  const autoSourcePattern = useSettingsStore((s) => s.autoSourcePattern);
+  const autoEjectEnabled = useSettingsStore((s) => s.autoEjectEnabled);
 
   const refreshTransferLogs = useTransferLogStore((s) => s.refresh);
 
@@ -189,6 +201,10 @@ function App() {
         setJobs(referenceJobs);
         setGroups(referenceGroups);
         setView("transfers");
+      } else if (fixture === "autoEject") {
+        setJobs(autoEjectJobs);
+        setGroups(autoEjectGroups);
+        setView("transfers");
       }
       return;
     }
@@ -202,6 +218,13 @@ function App() {
 
     return () => unlisten?.();
   }, [setDisks, setEndpoints, setGroups, setJobs]);
+
+  useEffect(() => {
+    if (!autoSourceEnabled) return;
+    for (const disk of disks) {
+      if (disk.isRemovable && wildcardMatches(disk.name, autoSourcePattern)) addSource(disk.id);
+    }
+  }, [addSource, autoSourceEnabled, autoSourcePattern, disks]);
 
   useEffect(() => {
     function handleGroupJobAdded(payload: GroupJobAddedEventPayload) {
@@ -313,6 +336,35 @@ function App() {
     refreshTransferLogs,
     desktopNotifications,
   ]);
+
+  useEffect(() => {
+    if (!autoEjectEnabled) return;
+    for (const group of Object.values(groups)) {
+      if (autoEjectedGroups.current.has(group.id) || group.jobIds.length === 0) continue;
+      const groupJobs = group.jobIds.map((id) => jobs[id]);
+      if (groupJobs.some((job) => !job || job.status !== "complete")) continue;
+      if (
+        groupJobs.some(
+          (job) =>
+            job.failedFiles.length > 0 ||
+            job.missingFiles.length > 0 ||
+            job.moveDeleteFailed.length > 0 ||
+            job.brokenMediaFiles.length > 0,
+        )
+      )
+        continue;
+      const sourcePath = groupJobs[0].sourcePath;
+      const disk = disks.find(
+        (candidate) => candidate.isRemovable && sourcePath.startsWith(candidate.mountPoint),
+      );
+      if (!disk) continue;
+      autoEjectedGroups.current.add(group.id);
+      ejectDisk(disk.mountPoint).catch((error) => {
+        autoEjectedGroups.current.delete(group.id);
+        console.error(error);
+      });
+    }
+  }, [autoEjectEnabled, disks, groups, jobs]);
 
   async function handleStartGroup(
     source: Endpoint,

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { setPreventSleepEnabled, setQueueMode as setQueueModeBackend } from "../lib/tauri";
 import type { ChecksumAlgorithm, VerificationMode } from "../types/job";
 import type { QueueMode } from "../types/queue";
@@ -27,6 +28,9 @@ interface SettingsState {
    * per copied file, next to that file, alongside the one combined MHL
    * already written at the destination root. */
   createPerFileMhl: boolean;
+  autoSourceEnabled: boolean;
+  autoSourcePattern: string;
+  autoEjectEnabled: boolean;
   setVerificationMode: (mode: VerificationMode) => void;
   setChecksumAlgorithm: (algorithm: ChecksumAlgorithm) => void;
   setPreventSleep: (enabled: boolean) => void;
@@ -37,9 +41,14 @@ interface SettingsState {
   setLegacyChecksumAlgorithm: (algorithm: ChecksumAlgorithm) => void;
   setSaveLogToDestination: (enabled: boolean) => void;
   setCreatePerFileMhl: (enabled: boolean) => void;
+  setAutoSourceEnabled: (enabled: boolean) => void;
+  setAutoSourcePattern: (pattern: string) => void;
+  setAutoEjectEnabled: (enabled: boolean) => void;
 }
 
-export const useSettingsStore = create<SettingsState>((set) => ({
+export const useSettingsStore = create<SettingsState>()(
+  persist(
+    (set) => ({
   verificationMode: "sourceAndDestination",
   checksumAlgorithm: "xxh64",
   preventSleep: true,
@@ -50,6 +59,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   legacyChecksumAlgorithm: "sha1",
   saveLogToDestination: true,
   createPerFileMhl: false,
+  autoSourceEnabled: false,
+  autoSourcePattern: "*",
+  autoEjectEnabled: false,
   setVerificationMode: (verificationMode) => set({ verificationMode }),
   setChecksumAlgorithm: (checksumAlgorithm) => set({ checksumAlgorithm }),
   setMoveSameVolume: (moveSameVolume) => set({ moveSameVolume }),
@@ -57,6 +69,9 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setLegacyChecksumAlgorithm: (legacyChecksumAlgorithm) => set({ legacyChecksumAlgorithm }),
   setSaveLogToDestination: (saveLogToDestination) => set({ saveLogToDestination }),
   setCreatePerFileMhl: (createPerFileMhl) => set({ createPerFileMhl }),
+  setAutoSourceEnabled: (autoSourceEnabled) => set({ autoSourceEnabled }),
+  setAutoSourcePattern: (autoSourcePattern) => set({ autoSourcePattern }),
+  setAutoEjectEnabled: (autoEjectEnabled) => set({ autoEjectEnabled }),
   setPreventSleep: (preventSleep) => {
     set({ preventSleep });
     setPreventSleepEnabled(preventSleep).catch(console.error);
@@ -66,4 +81,24 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     set({ queueMode });
     setQueueModeBackend(queueMode).catch(console.error);
   },
-}));
+    }),
+    {
+      name: "offloadkit-settings-v1",
+      partialize: (state) => ({
+        verificationMode: state.verificationMode,
+        checksumAlgorithm: state.checksumAlgorithm,
+        preventSleep: state.preventSleep,
+        desktopNotifications: state.desktopNotifications,
+        queueMode: state.queueMode,
+        moveSameVolume: state.moveSameVolume,
+        legacyChecksumEnabled: state.legacyChecksumEnabled,
+        legacyChecksumAlgorithm: state.legacyChecksumAlgorithm,
+        saveLogToDestination: state.saveLogToDestination,
+        createPerFileMhl: state.createPerFileMhl,
+        autoSourceEnabled: state.autoSourceEnabled,
+        autoSourcePattern: state.autoSourcePattern,
+        autoEjectEnabled: state.autoEjectEnabled,
+      }),
+    },
+  ),
+);

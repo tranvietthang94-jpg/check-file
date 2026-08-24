@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import { defaultOrganizeSettings } from "../types/organize";
 import type {
   BundleIgnoreRule,
@@ -46,7 +47,9 @@ function toTemplate(value: string): string | null {
   return value.trim() === "" ? null : value;
 }
 
-export const useOrganizeStore = create<OrganizeState>((set) => ({
+export const useOrganizeStore = create<OrganizeState>()(
+  persist(
+    (set) => ({
   ...defaultOrganizeSettings(),
 
   setRenameTemplate: (template) => set({ renameTemplate: toTemplate(template) }),
@@ -103,4 +106,24 @@ export const useOrganizeStore = create<OrganizeState>((set) => ({
   setAutoContinueOnBrokenMedia: (autoContinueOnBrokenMedia) =>
     set({ autoContinueOnBrokenMedia }),
   loadSettings: (settings) => set({ ...settings }),
-}));
+    }),
+    {
+      name: "offloadkit-organize-v1",
+      partialize: (state) => ({
+        renameTemplate: state.renameTemplate,
+        folderTemplate: state.folderTemplate,
+        counterPadding: state.counterPadding,
+        selectiveCopy: state.selectiveCopy,
+        bundleIgnore: state.bundleIgnore,
+        ignoreEmptyFolders: state.ignoreEmptyFolders,
+        flatten: state.flatten,
+        contentDateExcludedExtensions: state.contentDateExcludedExtensions,
+        dateOverride: state.dateOverride,
+        elements: state.elements,
+        autoLabel: state.autoLabel,
+        skipModificationDateCheck: state.skipModificationDateCheck,
+        autoContinueOnBrokenMedia: state.autoContinueOnBrokenMedia,
+      }),
+    },
+  ),
+);

@@ -4,6 +4,7 @@ import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { useDisksStore } from "../state/disksStore";
 import { useTransfersStore } from "../state/transfersStore";
 import { useMhlVerifyStore } from "../state/mhlVerifyStore";
+import { useRecentsStore } from "../state/recentsStore";
 import { ejectDisk, renameDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
 import { DISK_DRAG_MIME, ENDPOINT_REMOVE_MIME } from "../lib/dragTypes";
@@ -62,6 +63,12 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const hideDisk = useDisksStore((s) => s.hideDisk);
   const jobs = useTransfersStore((s) => s.jobs);
   const runVerify = useMhlVerifyStore((s) => s.runVerify);
+  const recentSources = useRecentsStore((s) => s.recentSources);
+  const recentDestinations = useRecentsStore((s) => s.recentDestinations);
+  const addRecentSource = useRecentsStore((s) => s.addRecentSource);
+  const addRecentDestination = useRecentsStore((s) => s.addRecentDestination);
+  const clearRecentSources = useRecentsStore((s) => s.clearRecentSources);
+  const clearRecentDestinations = useRecentsStore((s) => s.clearRecentDestinations);
 
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
@@ -139,6 +146,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     if (!folder || Array.isArray(folder)) return;
     if (!sources.some((s) => s.diskId === disk.id)) addSource(disk.id);
     setSourcePath(disk.id, folder);
+    addRecentSource(folder);
   }
 
   async function chooseDestinationFolder(disk: DiskInfo) {
@@ -146,6 +154,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
     if (!folder || Array.isArray(folder)) return;
     if (!destinations.some((d) => d.diskId === disk.id)) addDestination(disk.id);
     setDestinationPath(disk.id, folder);
+    addRecentDestination(folder);
   }
 
   async function verifyOtherFolder() {
@@ -177,12 +186,38 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
       {
         label: "Thư mục Nguồn",
         icon: <FolderInput className={iconClass} />,
-        children: [{ label: "Chọn thư mục…", onSelect: () => chooseSourceFolder(disk) }],
+        children: [
+          { label: "Chọn thư mục…", onSelect: () => chooseSourceFolder(disk) },
+          ...recentSources.map((path) => ({
+            label: path,
+            onSelect: () => {
+              if (!isSource) addSource(disk.id);
+              setSourcePath(disk.id, path);
+              addRecentSource(path);
+            },
+          })),
+          ...(recentSources.length > 0
+            ? [{ label: "Xóa thư mục gần đây", onSelect: clearRecentSources }]
+            : []),
+        ],
       },
       {
         label: "Thư mục Đích",
         icon: <FolderOutput className={iconClass} />,
-        children: [{ label: "Chọn thư mục…", onSelect: () => chooseDestinationFolder(disk) }],
+        children: [
+          { label: "Chọn thư mục…", onSelect: () => chooseDestinationFolder(disk) },
+          ...recentDestinations.map((path) => ({
+            label: path,
+            onSelect: () => {
+              if (!isDestination) addDestination(disk.id);
+              setDestinationPath(disk.id, path);
+              addRecentDestination(path);
+            },
+          })),
+          ...(recentDestinations.length > 0
+            ? [{ label: "Xóa thư mục gần đây", onSelect: clearRecentDestinations }]
+            : []),
+        ],
       },
       {
         label: "Đặt làm Nguồn",
