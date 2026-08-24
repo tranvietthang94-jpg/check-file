@@ -11,6 +11,7 @@ import type {
 interface TransfersState {
   jobs: Record<string, TransferJob>;
   addJob: (job: TransferJob) => void;
+  setJobs: (jobs: Record<string, TransferJob>) => void;
   applyScan: (payload: ScanEventPayload) => void;
   applyProgress: (payload: ProgressEventPayload) => void;
   applyComplete: (payload: CompleteEventPayload) => void;
@@ -34,6 +35,7 @@ export const useTransfersStore = create<TransfersState>((set) => ({
   jobs: {},
 
   addJob: (job) => set((state) => ({ jobs: { ...state.jobs, [job.id]: job } })),
+  setJobs: (jobs) => set({ jobs }),
 
   applyScan: (payload) =>
     set((state) => ({

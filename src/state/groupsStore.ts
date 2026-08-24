@@ -18,6 +18,7 @@ interface GroupsState {
     destinationLabels: string[],
   ) => void;
   addJobToGroup: (groupId: string, jobId: string) => void;
+  setGroups: (groups: Record<string, TransferGroup>) => void;
 }
 
 function emptyGroup(id: string): TransferGroup {
@@ -26,6 +27,7 @@ function emptyGroup(id: string): TransferGroup {
 
 export const useGroupsStore = create<GroupsState>((set) => ({
   groups: {},
+  setGroups: (groups) => set({ groups }),
 
   setGroupMeta: (id, mode, sourceLabel, destinationLabels) =>
     set((state) => {

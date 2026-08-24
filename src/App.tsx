@@ -45,9 +45,11 @@ import type { TransferJob } from "./types/job";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/media";
 import {
-  isReferenceFixtureEnabled,
   referenceDestinations,
   referenceDisks,
+  referenceFixture,
+  referenceGroups,
+  referenceJobs,
   referenceSources,
 } from "./dev/referenceFixtures";
 import "./App.css";
@@ -85,6 +87,7 @@ function App() {
 
   const jobs = useTransfersStore((s) => s.jobs);
   const addJob = useTransfersStore((s) => s.addJob);
+  const setJobs = useTransfersStore((s) => s.setJobs);
   const applyScan = useTransfersStore((s) => s.applyScan);
   const applyProgress = useTransfersStore((s) => s.applyProgress);
   const applyComplete = useTransfersStore((s) => s.applyComplete);
@@ -95,6 +98,7 @@ function App() {
 
   const groups = useGroupsStore((s) => s.groups);
   const setGroupMeta = useGroupsStore((s) => s.setGroupMeta);
+  const setGroups = useGroupsStore((s) => s.setGroups);
   const addJobToGroup = useGroupsStore((s) => s.addJobToGroup);
 
   const mediaScans = useMediaStore((s) => s.scans);
@@ -152,9 +156,15 @@ function App() {
   };
 
   useEffect(() => {
-    if (isReferenceFixtureEnabled()) {
+    const fixture = referenceFixture();
+    if (fixture) {
       setDisks(referenceDisks);
       setEndpoints(referenceSources, referenceDestinations);
+      if (fixture === "transfers") {
+        setJobs(referenceJobs);
+        setGroups(referenceGroups);
+        setView("transfers");
+      }
       return;
     }
 
@@ -166,7 +176,7 @@ function App() {
     });
 
     return () => unlisten?.();
-  }, [setDisks, setEndpoints]);
+  }, [setDisks, setEndpoints, setGroups, setJobs]);
 
   useEffect(() => {
     function handleGroupJobAdded(payload: GroupJobAddedEventPayload) {

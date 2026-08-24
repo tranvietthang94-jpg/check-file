@@ -48,7 +48,7 @@ export function AddTransfersBar({
   const moveEligible = destinations.length === 1 && verificationMode !== "transfer";
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 border-t border-neutral-800 bg-neutral-900/95 px-6 py-3 backdrop-blur">
+    <div data-testid="add-transfers-bar" className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-4 border-t border-neutral-800 bg-neutral-900/95 px-6 py-3 backdrop-blur">
       <IconButton
         onClick={onClear}
         title="Xóa hết Nguồn và Đích"

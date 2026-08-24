@@ -94,7 +94,7 @@ function JobRow({
   const pct = job.totalBytes > 0 ? Math.min(100, (job.bytesCopied / job.totalBytes) * 100) : 0;
 
   return (
-    <li className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-950 px-3 py-2">
+    <li data-testid="transfer-job-row" className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-950 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs">
           {job.hop === 2 && (
@@ -105,6 +105,7 @@ function JobRow({
           {job.destinationLabel}
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
+          <span className="sr-only">{STATUS_LABEL[job.status]}</span>
           {canResume(job) && (
             <IconButton
               tone="blue"
@@ -134,7 +135,14 @@ function JobRow({
         </span>
       </div>
 
-      <div className="h-1.5 w-full overflow-hidden rounded bg-neutral-800">
+      <div
+        role="progressbar"
+        aria-label={`Tiến độ ${job.destinationLabel}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(pct)}
+        className="h-1.5 w-full overflow-hidden rounded bg-neutral-800"
+      >
         <div
           className={`h-full ${progressBarColor(job)} transition-all`}
           style={{ width: `${pct}%` }}
