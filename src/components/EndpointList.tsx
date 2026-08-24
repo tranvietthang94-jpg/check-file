@@ -147,6 +147,7 @@ export function EndpointList({
   return (
     <Panel
       as="section"
+      data-testid={title === "Nguồn" ? "sources-drop-zone" : title === "Đích" ? "destinations-drop-zone" : undefined}
       className={cn(
         "flex flex-col gap-2 p-3",
         onDropDisk && "!border-dashed",
@@ -188,6 +189,7 @@ export function EndpointList({
           return (
             <li
               key={endpoint.diskId}
+              data-testid={title === "Nguồn" ? "source-endpoint-card" : "destination-endpoint-card"}
               draggable={!!onReorder}
               onDragStart={(e) => {
                 if (!onReorder) return;

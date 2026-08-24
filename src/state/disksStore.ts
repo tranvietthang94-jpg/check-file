@@ -65,6 +65,7 @@ export const useDisksStore = create<DisksState>((set, get) => ({
   setEndpoints: (sources, destinations) => set({ sources, destinations }),
 
   addSource: (diskId) => {
+    if (!get().disks.some((disk) => disk.id === diskId)) return;
     set((state) => {
       if (state.sources.some((s) => s.diskId === diskId)) return state;
       const disk = get().disks.find((d) => d.id === diskId);
@@ -79,7 +80,8 @@ export const useDisksStore = create<DisksState>((set, get) => ({
     get().recomputeAutoLabels();
   },
 
-  addDestination: (diskId) =>
+  addDestination: (diskId) => {
+    if (!get().disks.some((disk) => disk.id === diskId)) return;
     set((state) => {
       if (state.destinations.some((d) => d.diskId === diskId)) return state;
       const disk = get().disks.find((d) => d.id === diskId);
@@ -89,7 +91,8 @@ export const useDisksStore = create<DisksState>((set, get) => ({
           { diskId, label: "", path: disk?.mountPoint ?? "", isAutoLabel: false },
         ],
       };
-    }),
+    });
+  },
 
   removeSource: (diskId) => {
     set((state) => ({
