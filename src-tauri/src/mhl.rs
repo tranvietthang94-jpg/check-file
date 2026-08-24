@@ -506,7 +506,7 @@ pub fn repair_mhl_entry(
     }
 
     let source = source_root.join(relative_path);
-    let destination = destination_root.join(relative_path);
+    let destination = crate::path_safety::safe_destination(destination_root, relative_path)?;
     let actual = checksum::hash_file(&source, algorithm)?;
     if !actual.eq_ignore_ascii_case(expected_checksum) {
         return Err(io::Error::new(
@@ -539,7 +539,7 @@ pub fn repair_mhl_entry(
             }
             fs::rename(&destination, evidence)?;
         }
-        fs::rename(&staging, &destination)
+        crate::atomic_file::replace_file(&staging, &destination)
     })();
     if result.is_err() {
         let _ = fs::remove_file(staging);
@@ -842,6 +842,40 @@ mod tests {
             verify_entry_against_disk(&entry, &root),
             MhlEntryStatus::Missing
         );
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn repair_rejects_a_destination_path_through_a_directory_link() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let destination = sandbox.path().join("destination");
+        let outside = sandbox.path().join("outside");
+        let source = sandbox.path().join("source");
+        fs::create_dir_all(&destination).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::create_dir_all(source.join("linked")).unwrap();
+        fs::write(source.join("linked/clip.mov"), b"known good bytes").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, destination.join("linked")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside, destination.join("linked")).unwrap();
+
+        let expected = checksum::hash_file(
+            &source.join("linked/clip.mov"),
+            ChecksumAlgorithm::Xxh64,
+        )
+        .unwrap();
+        assert!(repair_mhl_entry(
+            &destination,
+            Path::new("linked/clip.mov"),
+            &source,
+            ChecksumAlgorithm::Xxh64,
+            &expected,
+            true,
+        )
+        .is_err());
+        assert!(!outside.join("clip.mov").exists());
     }
 
     #[test]

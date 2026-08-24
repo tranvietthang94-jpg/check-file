@@ -10,6 +10,7 @@ mod media_scan;
 mod metadata;
 mod mhl;
 mod organize;
+mod path_safety;
 mod power;
 mod presets;
 mod queue;

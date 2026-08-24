@@ -20,25 +20,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         file.flush()?;
         file.sync_all()?;
         drop(file);
-        match fs::rename(&temp_path, path) {
-            Ok(()) => Ok(()),
-            Err(rename_err) if path.exists() => {
-                // Windows stdlib rename cannot replace an existing file. Keep
-                // the old complete document until the new one is fully synced,
-                // then use the smallest available replacement window.
-                fs::remove_file(path)?;
-                fs::rename(&temp_path, path).map_err(|replace_err| {
-                    io::Error::new(
-                        replace_err.kind(),
-                        format!(
-                            "failed to replace {} after rename error {rename_err}: {replace_err}",
-                            path.display()
-                        ),
-                    )
-                })
-            }
-            Err(err) => Err(err),
-        }
+        replace_file(&temp_path, path)
     })();
 
     if result.is_err() {
@@ -47,9 +29,52 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
+#[cfg(windows)]
+pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "Kernel32")]
+    extern "system" {
+        fn MoveFileExW(existing: *const u16, new_name: *const u16, flags: u32) -> i32;
+    }
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let ok = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(source, destination)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_replacement_keeps_the_previous_complete_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("record.json");
+        fs::write(&path, b"old complete data").unwrap();
+        let missing = dir.path().join("missing.tmp");
+
+        assert!(replace_file(&missing, &path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"old complete data");
+    }
 
     #[test]
     fn replaces_existing_content_and_removes_the_temporary_file() {

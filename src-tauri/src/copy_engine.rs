@@ -63,9 +63,28 @@ fn should_retry_copy(attempt: u32, cancelled: bool) -> bool {
 fn try_move_delete_source(
     absolute: &Path,
     relative_display: &str,
+    algorithm: ChecksumAlgorithm,
+    expected_checksum: &str,
     deleted_source_files: &mut Vec<String>,
     move_delete_failed: &mut Vec<FailedFile>,
 ) {
+    match checksum::verify_file_hash(absolute, expected_checksum, algorithm) {
+        Ok(true) => {}
+        Ok(false) => {
+            move_delete_failed.push(FailedFile {
+                path: relative_display.to_string(),
+                message: "source changed after verification; refusing to delete it".to_string(),
+            });
+            return;
+        }
+        Err(err) => {
+            move_delete_failed.push(FailedFile {
+                path: relative_display.to_string(),
+                message: format!("could not re-verify source before deletion: {err}"),
+            });
+            return;
+        }
+    }
     match fs::remove_file(absolute) {
         Ok(()) => deleted_source_files.push(relative_display.to_string()),
         Err(err) => move_delete_failed.push(FailedFile {
@@ -714,7 +733,16 @@ pub fn run_copy_core(
         };
         let organized_relative = organize::build_destination_path(&entry.relative, &ctx, organize);
 
-        let mut dest_path = destination.join(&organized_relative);
+        let mut dest_path = match crate::path_safety::safe_destination(destination, &organized_relative) {
+            Ok(path) => path,
+            Err(err) => {
+                failed_files.push(FailedFile {
+                    path: organized_relative.display().to_string(),
+                    message: err.to_string(),
+                });
+                continue;
+            }
+        };
         if let Some(parent) = dest_path.parent() {
             if let Err(err) = fs::create_dir_all(parent) {
                 failed_files.push(FailedFile {
@@ -763,7 +791,7 @@ pub fn run_copy_core(
                                 relative_path: relative_display.clone(),
                                 size: entry.size,
                                 modified: entry.modified,
-                                checksum: Some(source_hash),
+                                checksum: Some(source_hash.clone()),
                                 algorithm: checksum_algorithm,
                                 hashed_at: SystemTime::now(),
                                 legacy_checksum: None,
@@ -772,6 +800,8 @@ pub fn run_copy_core(
                             try_move_delete_source(
                                 &entry.absolute,
                                 &relative_display,
+                                checksum_algorithm,
+                                &source_hash,
                                 &mut deleted_source_files,
                                 &mut move_delete_failed,
                             );
@@ -1001,12 +1031,16 @@ pub fn run_copy_core(
                                 mhl_checksum = Some(hash.clone());
                             }
                             if can_move {
-                                try_move_delete_source(
-                                    &entry.absolute,
-                                    &copy_display,
-                                    &mut deleted_source_files,
-                                    &mut move_delete_failed,
-                                );
+                                if let Some(hash) = &source_hash {
+                                    try_move_delete_source(
+                                        &entry.absolute,
+                                        &copy_display,
+                                        checksum_algorithm,
+                                        hash,
+                                        &mut deleted_source_files,
+                                        &mut move_delete_failed,
+                                    );
+                                }
                             }
                         }
                         Err(err) => {
@@ -2272,6 +2306,30 @@ mod tests {
             checksum::hash_file(&src_file, ChecksumAlgorithm::Xxh64).unwrap(),
             "a stale MHL entry must never override a freshly computed checksum"
         );
+    }
+
+    #[test]
+    fn move_delete_refuses_a_source_that_changed_after_verification() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("clip.mov");
+        fs::write(&source, b"verified bytes").unwrap();
+        let expected = checksum::hash_file(&source, ChecksumAlgorithm::Xxh64).unwrap();
+        fs::write(&source, b"replacement bytes").unwrap();
+        let mut deleted = Vec::new();
+        let mut failed = Vec::new();
+
+        try_move_delete_source(
+            &source,
+            "clip.mov",
+            ChecksumAlgorithm::Xxh64,
+            &expected,
+            &mut deleted,
+            &mut failed,
+        );
+
+        assert!(source.exists());
+        assert!(deleted.is_empty());
+        assert_eq!(failed.len(), 1);
     }
 
     #[test]
