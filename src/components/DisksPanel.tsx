@@ -6,7 +6,7 @@ import { useTransfersStore } from "../state/transfersStore";
 import { useMhlVerifyStore } from "../state/mhlVerifyStore";
 import { ejectDisk, renameDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
-import { DISK_DRAG_MIME } from "../lib/dragTypes";
+import { DISK_DRAG_MIME, ENDPOINT_REMOVE_MIME } from "../lib/dragTypes";
 import { DriveIcon } from "./icons/DriveIcon";
 import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
 import { Panel } from "./ui/Panel";
@@ -52,6 +52,8 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const destinations = useDisksStore((s) => s.destinations);
   const addSource = useDisksStore((s) => s.addSource);
   const addDestination = useDisksStore((s) => s.addDestination);
+  const removeSource = useDisksStore((s) => s.removeSource);
+  const removeDestination = useDisksStore((s) => s.removeDestination);
   const insertDestinationAfter = useDisksStore((s) => s.insertDestinationAfter);
   const setSourceLabel = useDisksStore((s) => s.setSourceLabel);
   const setSourcePath = useDisksStore((s) => s.setSourcePath);
@@ -270,6 +272,18 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
       )}
       <ul
         data-testid="available-disk-grid"
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes(ENDPOINT_REMOVE_MIME)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(e) => {
+          const diskId = e.dataTransfer.getData(ENDPOINT_REMOVE_MIME);
+          if (!diskId) return;
+          e.preventDefault();
+          if (sources.some((s) => s.diskId === diskId)) removeSource(diskId);
+          if (destinations.some((d) => d.diskId === diskId)) removeDestination(diskId);
+        }}
         className="grid grid-cols-3 content-start gap-x-4 gap-y-5 overflow-y-auto px-2 py-3"
       >
         {availableDisks.map((disk) => {

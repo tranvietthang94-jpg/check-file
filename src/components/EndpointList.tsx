@@ -7,7 +7,7 @@ import { EmptyState } from "./ui/EmptyState";
 import { IconButton } from "./ui/IconButton";
 import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
 import { ArrowUpFromLine, ExternalLink, FolderInput, Inbox, Menu as MenuIcon, Plus, Tag, Trash2 } from "./icons";
-import { DISK_DRAG_MIME, ENDPOINT_REORDER_MIME } from "../lib/dragTypes";
+import { DISK_DRAG_MIME, ENDPOINT_REMOVE_MIME, ENDPOINT_REORDER_MIME } from "../lib/dragTypes";
 import { ejectDisk } from "../lib/tauri";
 import { formatBytes } from "../lib/format";
 import { cn } from "../lib/cn";
@@ -158,14 +158,14 @@ export function EndpointList({
         e.preventDefault();
         setDragOver(true);
       }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        if (!onDropDisk) return;
-        e.preventDefault();
-        setDragOver(false);
-        const diskId = e.dataTransfer.getData(DISK_DRAG_MIME);
-        if (diskId) onDropDisk(diskId);
-      }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          if (!onDropDisk) return;
+          e.preventDefault();
+          setDragOver(false);
+          const diskId = e.dataTransfer.getData(DISK_DRAG_MIME);
+          if (diskId) onDropDisk(diskId);
+        }}
     >
       <SectionHeading>{title}</SectionHeading>
       {endpoints.length === 0 && (
@@ -190,11 +190,11 @@ export function EndpointList({
             <li
               key={endpoint.diskId}
               data-testid={title === "Nguồn" ? "source-endpoint-card" : "destination-endpoint-card"}
-              draggable={!!onReorder}
+              draggable
               onDragStart={(e) => {
-                if (!onReorder) return;
-                e.dataTransfer.setData(ENDPOINT_REORDER_MIME, endpoint.diskId);
+                e.dataTransfer.setData(ENDPOINT_REMOVE_MIME, endpoint.diskId);
                 e.dataTransfer.effectAllowed = "move";
+                if (onReorder) e.dataTransfer.setData(ENDPOINT_REORDER_MIME, endpoint.diskId);
               }}
               onDragOver={(e) => {
                 if (!onReorder) return;

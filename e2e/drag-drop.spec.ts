@@ -29,6 +29,21 @@ test("dropping an available disk into Destinations appends it and removes it fro
   await expect(page.getByTestId("available-disk-card").filter({ hasText: "KHANH VAN" })).toHaveCount(0);
 });
 
+test("dragging an assigned source back to the disk grid removes its assignment", async ({ page }) => {
+  await dispatchDiskDrop(page, "D:", "sources-drop-zone");
+  await expect(page.getByTestId("source-endpoint-card")).toHaveCount(1);
+  await page.getByTestId("source-endpoint-card").evaluate((target) => {
+    const transfer = new DataTransfer();
+    transfer.setData("application/x-offloadkit-endpoint-remove", "D:");
+    target.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    const grid = document.querySelector('[data-testid="available-disk-grid"]');
+    grid?.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    grid?.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  });
+  await expect(page.getByTestId("source-endpoint-card")).toHaveCount(0);
+  await expect(page.getByTestId("available-disk-card").filter({ hasText: "KHANH VAN" })).toHaveCount(1);
+});
+
 async function dispatchDestinationReorder(
   page: import("@playwright/test").Page,
   fromDiskId: string,

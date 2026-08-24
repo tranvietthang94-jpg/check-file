@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GeneralPreferences } from "./preferences/GeneralPreferences";
 import { DisksPreferences } from "./preferences/DisksPreferences";
 import { OrganizePreferences } from "./preferences/OrganizePreferences";
@@ -17,10 +17,15 @@ const TABS: { id: Tab; label: string }[] = [
 interface PreferencesModalProps {
   open: boolean;
   onClose: () => void;
+  initialTab?: Tab;
 }
 
-export function PreferencesModal({ open, onClose }: PreferencesModalProps) {
-  const [tab, setTab] = useState<Tab>("general");
+export function PreferencesModal({ open, onClose, initialTab = "general" }: PreferencesModalProps) {
+  const [tab, setTab] = useState<Tab>(initialTab);
+
+  useEffect(() => {
+    if (open) setTab(initialTab);
+  }, [open, initialTab]);
 
   return (
     <Modal open={open} onClose={onClose} title="Cài đặt">

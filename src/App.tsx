@@ -29,6 +29,8 @@ import { EndpointList } from "./components/EndpointList";
 import { TransfersPanel } from "./components/TransfersPanel";
 import { AddTransfersBar } from "./components/AddTransfersBar";
 import { MediaBrowser } from "./components/MediaBrowser";
+import { AboutDialog } from "./components/AboutDialog";
+import { StartTransferFailureDialog } from "./components/StartTransferFailureDialog";
 import { PreferencesModal } from "./components/PreferencesModal";
 import { ReportsPanel } from "./components/ReportsPanel";
 import { MhlVerifyPanel } from "./components/MhlVerifyPanel";
@@ -37,7 +39,7 @@ import { Button } from "./components/ui/Button";
 import { IconButton } from "./components/ui/IconButton";
 import { Modal } from "./components/ui/Modal";
 import { DiskContextMenu, type DiskContextMenuItem } from "./components/DiskContextMenu";
-import { ArrowLeftRight, HardDrive, History, Menu, FileText, Settings } from "./components/icons";
+import { ArrowLeftRight, HardDrive, History, Info, Menu, FileText, Settings } from "./components/icons";
 import { pathLabel, formatBytes } from "./lib/format";
 import { notifyTransfer } from "./lib/notify";
 import type { DiskInfo, Endpoint } from "./types/disk";
@@ -62,8 +64,11 @@ function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
 function App() {
   const [view, setView] = useState<"disks" | "transfers">("disks");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferencesTab, setPreferencesTab] = useState<"general" | "disks" | "organize" | "transfers">("general");
   const [transferLogOpen, setTransferLogOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [startTransferError, setStartTransferError] = useState<string | null>(null);
   // Matches OffShoot's own hamburger menu -- Transfer Logs/Reports/Settings
   // open as their own windows from here rather than living permanently
   // stacked in the Transfers view.
@@ -154,6 +159,26 @@ function App() {
     skipModificationDateCheck: organizeSkipModificationDateCheck,
     autoContinueOnBrokenMedia: organizeAutoContinueOnBrokenMedia,
   };
+
+  useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      if (!event.ctrlKey || event.altKey || event.metaKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "d") setView("disks");
+      else if (key === "t") setView("transfers");
+      else if (key === "l") setTransferLogOpen(true);
+      else if (key === ",") {
+        setPreferencesTab("general");
+        setPreferencesOpen(true);
+      } else if (key === "1" || key === "2" || key === "3") {
+        setPreferencesTab(key === "1" ? "general" : key === "2" ? "transfers" : "organize");
+        setPreferencesOpen(true);
+      } else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   useEffect(() => {
     const fixture = referenceFixture();
@@ -295,6 +320,20 @@ function App() {
     mode: TransferGroupMode,
     moveAfterTransfer: boolean,
   ) {
+    if (!source.path.trim()) {
+      throw new Error(`Nguồn “${endpointLabel(source, disks)}” chưa có đường dẫn thư mục.`);
+    }
+    const missingDestination = destinationEndpoints.find((destination) => !destination.path.trim());
+    if (missingDestination) {
+      throw new Error(`Đích “${endpointLabel(missingDestination, disks)}” chưa có đường dẫn thư mục.`);
+    }
+    const sourceRoot = source.path.replace(/[\\/]+$/, "").toLowerCase();
+    if (destinationEndpoints.some((destination) => {
+      const destinationRoot = destination.path.replace(/[\\/]+$/, "").toLowerCase();
+      return destinationRoot === sourceRoot || destinationRoot.startsWith(`${sourceRoot}/`) || sourceRoot.startsWith(`${destinationRoot}/`);
+    })) {
+      throw new Error(`Nguồn “${endpointLabel(source, disks)}” và một Đích đang trùng hoặc chồng lấn đường dẫn.`);
+    }
     const groupId = await startTransferGroup(
       source.path,
       destinationEndpoints.map((d) => d.path),
@@ -324,8 +363,12 @@ function App() {
   // Destination independently); Cascade starts one chain per Source through
   // every Destination in the order the Destinations list is currently in.
   async function handleAddTransfers(mode: TransferGroupMode, moveAfterTransfer: boolean) {
-    for (const source of sources) {
-      await handleStartGroup(source, destinations, mode, moveAfterTransfer);
+    try {
+      for (const source of sources) {
+        await handleStartGroup(source, destinations, mode, moveAfterTransfer);
+      }
+    } catch (error) {
+      setStartTransferError(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -421,6 +464,7 @@ function App() {
                 key={v.id}
                 variant="ghost"
                 active={view === v.id}
+                aria-pressed={view === v.id}
                 icon={v.icon}
                 onClick={() => setView(v.id)}
               >
@@ -463,9 +507,17 @@ function App() {
                 onSelect: () => setReportsOpen(true),
               },
               {
+                label: "Giới thiệu OffloadKit",
+                icon: <Info className="h-3.5 w-3.5" />,
+                onSelect: () => setAboutOpen(true),
+              },
+              {
                 label: "Cài đặt",
                 icon: <Settings className="h-3.5 w-3.5" />,
-                onSelect: () => setPreferencesOpen(true),
+                onSelect: () => {
+                  setPreferencesTab("general");
+                  setPreferencesOpen(true);
+                },
               },
             ] satisfies DiskContextMenuItem[]
           }
@@ -552,7 +604,11 @@ function App() {
         onClear={clearSourcesAndDestinations}
       />
 
-      <PreferencesModal open={preferencesOpen} onClose={() => setPreferencesOpen(false)} />
+      <PreferencesModal
+        open={preferencesOpen}
+        initialTab={preferencesTab}
+        onClose={() => setPreferencesOpen(false)}
+      />
 
       <Modal open={transferLogOpen} onClose={() => setTransferLogOpen(false)} title="Nhật ký truyền tải">
         <TransferLogPanel onViewClips={handleBrowse} />
@@ -561,6 +617,13 @@ function App() {
       <Modal open={reportsOpen} onClose={() => setReportsOpen(false)} title="Báo cáo">
         <ReportsPanel />
       </Modal>
+
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+      <StartTransferFailureDialog
+        message={startTransferError}
+        onClose={() => setStartTransferError(null)}
+      />
 
       {activeScan && (
         <MediaBrowser

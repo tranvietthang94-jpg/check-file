@@ -34,5 +34,6 @@ export {
   File,
   FileText,
   History,
+  Info,
   Menu,
 } from "lucide-react";

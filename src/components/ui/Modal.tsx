@@ -23,6 +23,9 @@ export function Modal({ open, onClose, title, children, panelClassName }: ModalP
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label={String(title)}
       onClick={onClose}
     >
       <Panel
