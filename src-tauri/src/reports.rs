@@ -402,6 +402,7 @@ pub fn generate_report_html(
     let logo = request
         .logo_data_url
         .as_deref()
+        .filter(|url| url.starts_with("data:image/") && !url.contains(['"', '\'', '<', '>']))
         .map(|url| format!(r#"<img class="logo" src="{url}" alt="Logo">"#))
         .unwrap_or_default();
     let notes = if request.notes.trim().is_empty() {
@@ -576,6 +577,18 @@ mod tests {
         let entries = vec![sample_entry("job-1", "G:\\", "D:\\Offload")];
         let html = generate_report_html(&entries, &default_request(), None);
         assert!(!html.contains("class=\"files\""));
+    }
+
+    #[test]
+    fn rejects_non_image_or_attribute_breaking_logo_urls() {
+        let entries = [sample_entry("job-1", "G:\\", "D:\\Offload")];
+        let mut request = default_request();
+        request.logo_data_url = Some("x\" onerror=\"alert(1)".to_string());
+
+        let html = generate_report_html(&entries, &request, None);
+
+        assert!(!html.contains("onerror="));
+        assert!(!html.contains("<img class=\"logo\""));
     }
 
     #[test]

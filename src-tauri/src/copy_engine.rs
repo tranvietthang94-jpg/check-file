@@ -539,6 +539,33 @@ pub fn run_copy_core(
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> CopyOutcome {
+    let source_root = fs::canonicalize(source);
+    let destination_root = fs::canonicalize(destination);
+    if let (Ok(source_root), Ok(destination_root)) = (&source_root, &destination_root) {
+        if source_root == destination_root
+            || source_root.starts_with(destination_root)
+            || destination_root.starts_with(source_root)
+        {
+            return CopyOutcome {
+                cancelled: false,
+                files_copied: 0,
+                bytes_copied: 0,
+                failed_files: vec![FailedFile {
+                    path: destination.display().to_string(),
+                    message: "source and destination must not overlap".to_string(),
+                }],
+                verified_files: Vec::new(),
+                skipped_files: Vec::new(),
+                renamed_files: Vec::new(),
+                mhl_entries: Vec::new(),
+                deleted_source_files: Vec::new(),
+                move_delete_failed: Vec::new(),
+                broken_media_files: Vec::new(),
+                missing_files: Vec::new(),
+            };
+        }
+    }
+
     // OffShoot's "Don't copy but move data when a Source and Destination are
     // located on the same volume": when both resolve to the same physical
     // disk, an `fs::rename` relocates the file instantly with no byte
@@ -1248,6 +1275,33 @@ mod tests {
     impl ProgressSink for NoopSink {
         fn on_scan(&self, _total_files: u64, _total_bytes: u64) {}
         fn on_progress(&self, _payload: ProgressPayload) {}
+    }
+
+    #[test]
+    fn overlapping_source_and_destination_are_rejected_without_deleting_source() {
+        let root = tempfile::tempdir().unwrap();
+        let source_file = root.path().join("clip.mov");
+        fs::write(&source_file, b"only copy").unwrap();
+
+        let cancel_flag = AtomicBool::new(false);
+        let outcome = run_copy_core(
+            &NoopSink,
+            "overlap".to_string(),
+            root.path(),
+            root.path(),
+            &cancel_flag,
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "CARD",
+            &OrganizeSettings::default(),
+            true,
+            false,
+            None,
+        );
+
+        assert!(source_file.exists());
+        assert_eq!(outcome.failed_files.len(), 1);
+        assert_eq!(outcome.files_copied, 0);
     }
 
     #[test]

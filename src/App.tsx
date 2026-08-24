@@ -337,9 +337,13 @@ function App() {
     group.jobIds.forEach((jobId) => handleCancelJob(jobId));
   }
 
-  function handleResolveBrokenMedia(jobId: string, proceed: boolean) {
-    clearBrokenMediaAlert(jobId);
-    resolveBrokenMedia(jobId, proceed).catch(console.error);
+  async function handleResolveBrokenMedia(jobId: string, proceed: boolean) {
+    try {
+      await resolveBrokenMedia(jobId, proceed);
+      clearBrokenMediaAlert(jobId);
+    } catch (error) {
+      console.error(error);
+    }
   }
 
   // Resume = a fresh Parallel transfer over the exact same source →

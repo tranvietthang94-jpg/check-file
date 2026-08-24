@@ -453,8 +453,22 @@ pub fn verify_mhl_file(mhl_path: &Path) -> io::Result<MhlVerifyReport> {
     })
 }
 
+fn is_safe_relative_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+}
+
 fn verify_entry_against_disk(entry: &ParsedMhlEntry, root: &Path) -> MhlEntryStatus {
-    let absolute = root.join(&entry.relative_path);
+    let relative = Path::new(&entry.relative_path);
+    if !is_safe_relative_path(relative) {
+        return MhlEntryStatus::Missing;
+    }
+    let absolute = root.join(relative);
     let Ok(meta) = fs::metadata(&absolute) else {
         return MhlEntryStatus::Missing;
     };
@@ -484,11 +498,7 @@ pub fn repair_mhl_entry(
             "repair requires explicit approval",
         ));
     }
-    if relative_path.is_absolute()
-        || relative_path
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
+    if !is_safe_relative_path(relative_path) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "repair path must stay inside its roots",
@@ -810,6 +820,27 @@ mod tests {
             ),
             None,
             "an MHL checksum in a different algorithm can't stand in for the requested one"
+        );
+    }
+
+    #[test]
+    fn malformed_mhl_paths_are_not_joined_outside_the_mhl_root() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let root = sandbox.path().join("mhl-root");
+        fs::create_dir(&root).unwrap();
+        let outside = sandbox.path().join("outside.bin");
+        fs::write(&outside, b"outside").unwrap();
+        let entry = ParsedMhlEntry {
+            relative_path: "../outside.bin".to_string(),
+            size: 7,
+            modified: SystemTime::UNIX_EPOCH,
+            checksum: Some(checksum::hash_file(&outside, ChecksumAlgorithm::Xxh64).unwrap()),
+            algorithm: Some(ChecksumAlgorithm::Xxh64),
+        };
+
+        assert_eq!(
+            verify_entry_against_disk(&entry, &root),
+            MhlEntryStatus::Missing
         );
     }
 
