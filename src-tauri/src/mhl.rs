@@ -473,7 +473,13 @@ fn verify_entry_against_disk(entry: &ParsedMhlEntry, root: &Path) -> MhlEntrySta
     if !is_safe_relative_path(relative) {
         return MhlEntryStatus::Missing;
     }
-    let absolute = root.join(relative);
+    let absolute = match crate::path_safety::safe_destination(root, relative) {
+        Ok(path) => path,
+        Err(_) => return MhlEntryStatus::Missing,
+    };
+    if crate::path_safety::revalidate_destination(root, &absolute).is_err() {
+        return MhlEntryStatus::Missing;
+    }
     let Ok(meta) = fs::metadata(&absolute) else {
         return MhlEntryStatus::Missing;
     };
@@ -603,7 +609,8 @@ pub fn repair_mhl_entry(
         ));
     }
 
-    let source = source_root.join(relative_path);
+    let source = crate::path_safety::safe_destination(source_root, relative_path)?;
+    crate::path_safety::revalidate_destination(source_root, &source)?;
     let destination = crate::path_safety::safe_destination(destination_root, relative_path)?;
     let actual = checksum::hash_file(&source, algorithm)?;
     if !actual.eq_ignore_ascii_case(expected_checksum) {
@@ -1066,6 +1073,58 @@ mod tests {
 
     #[cfg(any(unix, windows))]
     #[test]
+    fn verify_treats_a_file_through_a_directory_link_as_missing() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let root = sandbox.path().join("mhl-root");
+        let outside = sandbox.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("clip.mov"), b"outside bytes").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside, root.join("linked")).unwrap();
+        let entry = ParsedMhlEntry {
+            relative_path: "linked/clip.mov".to_string(),
+            size: 13,
+            modified: SystemTime::UNIX_EPOCH,
+            checksum: Some(checksum::hash_file(&outside.join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap()),
+            algorithm: Some(ChecksumAlgorithm::Xxh64),
+        };
+
+        assert_eq!(verify_entry_against_disk(&entry, &root), MhlEntryStatus::Missing);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn repair_rejects_a_source_path_through_a_directory_link() {
+        let sandbox = tempfile::tempdir().unwrap();
+        let destination = sandbox.path().join("destination");
+        let outside = sandbox.path().join("outside");
+        let source = sandbox.path().join("source");
+        fs::create_dir_all(&destination).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(outside.join("clip.mov"), b"outside source bytes").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, source.join("linked")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside, source.join("linked")).unwrap();
+        let expected = checksum::hash_file(&outside.join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
+
+        assert!(repair_mhl_entry(
+            &destination,
+            Path::new("linked/clip.mov"),
+            &source,
+            ChecksumAlgorithm::Xxh64,
+            &expected,
+            true,
+        ).is_err());
+        assert!(!destination.join("linked/clip.mov").exists());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
     fn repair_rejects_a_destination_path_through_a_directory_link() {
         let sandbox = tempfile::tempdir().unwrap();
         let destination = sandbox.path().join("destination");
@@ -1192,6 +1251,43 @@ mod tests {
             fs::read(destination.path().join("clip.mov")).unwrap(),
             b"bad bytes"
         );
+    }
+
+    #[test]
+    fn real_repair_smoke_uses_auto_save_source_and_restores_a_corrupt_copy() {
+        let source_root = PathBuf::from(r"F:\Adobe Premiere Pro Auto-Save");
+        let source_name = "AD--9d8890ef-c5ad-f899-d794-64788ed9c875-2026-05-29_14-11-38.prproj";
+        let source = source_root.join(source_name);
+        assert!(source.is_file(), "missing real Auto-Save source: {source:?}");
+        let destination_root = source_root.join("_OffloadKit_Repair_Smoke");
+        if destination_root.exists() {
+            fs::remove_dir_all(&destination_root).unwrap();
+        }
+        fs::create_dir_all(&destination_root).unwrap();
+        let destination = destination_root.join(source_name);
+        fs::copy(&source, &destination).unwrap();
+        fs::write(&destination, b"INTENTIONALLY CORRUPTED TEST COPY").unwrap();
+        let metadata = fs::metadata(&source).unwrap();
+        let expected = checksum::hash_file(&source, ChecksumAlgorithm::Sha1).unwrap();
+        let entry = MhlFileEntry {
+            relative_path: source_name.to_string(),
+            size: metadata.len(),
+            modified: metadata.modified().unwrap(),
+            checksum: Some(expected),
+            algorithm: ChecksumAlgorithm::Sha1,
+            hashed_at: SystemTime::now(),
+            legacy_checksum: None,
+            legacy_algorithm: None,
+        };
+        let mhl_path = write_mhl(&destination_root, &[entry], SystemTime::now(), SystemTime::now())
+            .unwrap()
+            .expect("real repair smoke MHL should be written");
+        let report = repair_mhl_entry_from_report(&mhl_path, Path::new(source_name), &source_root, true)
+            .unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), fs::read(&source).unwrap());
+        assert!(destination.with_file_name(format!("{source_name}.ofkit-corrupt")).is_file());
+        assert_eq!(report.results[0].status, MhlEntryStatus::Verified);
+        fs::remove_dir_all(&destination_root).unwrap();
     }
 
     #[test]
