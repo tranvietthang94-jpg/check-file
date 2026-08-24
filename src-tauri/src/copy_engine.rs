@@ -712,20 +712,79 @@ pub fn run_copy_core(
         ) {
             Ok(DuplicateAction::Copy) => {}
             Ok(DuplicateAction::Skip) => {
-                tracker.add_bytes(entry.size, &relative_display);
-                tracker.finish_file();
+                // Size + mtime is only a cheap candidate match. Before Move
+                // can delete the source, prove the existing destination has
+                // identical bytes with the selected checksum.
                 if can_move {
-                    try_move_delete_source(
-                        &entry.absolute,
-                        &relative_display,
-                        &mut deleted_source_files,
-                        &mut move_delete_failed,
-                    );
+                    let source_hash = checksum::hash_file(&entry.absolute, checksum_algorithm);
+                    let destination_hash = checksum::hash_file(&dest_path, checksum_algorithm);
+                    match (source_hash, destination_hash) {
+                        (Ok(source_hash), Ok(destination_hash))
+                            if source_hash.eq_ignore_ascii_case(&destination_hash) =>
+                        {
+                            tracker.add_bytes(entry.size, &relative_display);
+                            tracker.finish_file();
+                            verified_files.push(VerifiedFile {
+                                path: relative_display.clone(),
+                                checksum: source_hash.clone(),
+                                algorithm: checksum_algorithm,
+                                legacy_checksum: None,
+                                legacy_algorithm: None,
+                            });
+                            mhl_entries.push(MhlFileEntry {
+                                relative_path: relative_display.clone(),
+                                size: entry.size,
+                                modified: entry.modified,
+                                checksum: Some(source_hash),
+                                algorithm: checksum_algorithm,
+                                hashed_at: SystemTime::now(),
+                                legacy_checksum: None,
+                                legacy_algorithm: None,
+                            });
+                            try_move_delete_source(
+                                &entry.absolute,
+                                &relative_display,
+                                &mut deleted_source_files,
+                                &mut move_delete_failed,
+                            );
+                            skipped_files.push(SkippedFile {
+                                path: relative_display,
+                            });
+                            continue;
+                        }
+                        (Err(err), _) | (_, Err(err)) => {
+                            failed_files.push(FailedFile {
+                                path: relative_display,
+                                message: format!(
+                                    "could not verify existing destination before deleting source: {err}"
+                                ),
+                            });
+                            continue;
+                        }
+                        _ => {
+                            let new_path = dedup::next_available_name(&dest_path);
+                            copy_display = entry
+                                .relative
+                                .parent()
+                                .unwrap_or_else(|| Path::new(""))
+                                .join(new_path.file_name().unwrap_or_default())
+                                .display()
+                                .to_string();
+                            renamed_files.push(RenamedFile {
+                                original_path: relative_display,
+                                renamed_to: copy_display.clone(),
+                            });
+                            dest_path = new_path;
+                        }
+                    }
+                } else {
+                    tracker.add_bytes(entry.size, &relative_display);
+                    tracker.finish_file();
+                    skipped_files.push(SkippedFile {
+                        path: relative_display,
+                    });
+                    continue;
                 }
-                skipped_files.push(SkippedFile {
-                    path: relative_display,
-                });
-                continue;
             }
             Ok(DuplicateAction::Rename(new_path)) => {
                 copy_display = entry
@@ -1656,6 +1715,46 @@ mod tests {
             fs::read(dst_dir.path().join("clip.mp4")).unwrap(),
             b"camera footage"
         );
+    }
+
+    #[test]
+    fn matching_size_and_mtime_but_different_bytes_are_not_skipped_or_deleted_on_move() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let src_path = src_dir.path().join("clip.mov");
+        let dst_path = dst_dir.path().join("clip.mov");
+        fs::write(&src_path, b"SOURCE-CONTENT").unwrap();
+        fs::write(&dst_path, b"DESTIN-CONTENT").unwrap();
+        assert_eq!(fs::metadata(&src_path).unwrap().len(), fs::metadata(&dst_path).unwrap().len());
+        let source_modified = fs::metadata(&src_path).unwrap().modified().unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&dst_path)
+            .unwrap()
+            .set_modified(source_modified)
+            .unwrap();
+
+        let outcome = run_copy_core(
+            &NoopSink,
+            "job-safe-duplicate-move".to_string(),
+            src_dir.path(),
+            dst_dir.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            true,
+            false,
+            None,
+        );
+
+        assert!(!src_path.exists(), "Move may delete the source only after the different bytes were copied and verified under a new name");
+        assert_eq!(fs::read(&dst_path).unwrap(), b"DESTIN-CONTENT");
+        assert!(outcome.skipped_files.is_empty());
+        assert_eq!(outcome.deleted_source_files, vec!["clip 2.mov".to_string()]);
+        assert_eq!(outcome.renamed_files.len(), 1);
+        assert_eq!(fs::read(dst_dir.path().join("clip 2.mov")).unwrap(), b"SOURCE-CONTENT");
     }
 
     #[test]
