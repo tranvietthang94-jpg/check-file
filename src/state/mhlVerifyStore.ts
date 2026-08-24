@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { verifyMhl, verifyMhlsInFolder } from "../lib/tauri";
+import { repairMhlEntry, verifyMhl, verifyMhlsInFolder } from "../lib/tauri";
 import type { MhlVerifyReport } from "../types/mhl";
 
 interface MhlVerifyState {
@@ -14,6 +14,7 @@ interface MhlVerifyState {
    * from the panel's own inputs). Used both by the panel's Verify button and
    * by a disk's right-click "Verify" context-menu action. */
   runVerify: (path?: string, mode?: "file" | "folder") => Promise<void>;
+  repairEntry: (mhlPath: string, relativePath: string, sourceRoot: string) => Promise<void>;
 }
 
 export const useMhlVerifyStore = create<MhlVerifyState>((set, get) => ({
@@ -25,6 +26,21 @@ export const useMhlVerifyStore = create<MhlVerifyState>((set, get) => ({
 
   setPath: (path) => set({ path }),
   setMode: (mode) => set({ mode }),
+
+  repairEntry: async (mhlPath, relativePath, sourceRoot) => {
+    set({ busy: true, error: null });
+    try {
+      const report = await repairMhlEntry(mhlPath, relativePath, sourceRoot, true);
+      set((state) => ({
+        reports: (state.reports ?? []).map((item) =>
+          item.mhlPath === report.mhlPath ? report : item,
+        ),
+        busy: false,
+      }));
+    } catch (err) {
+      set({ error: String(err), busy: false });
+    }
+  },
 
   runVerify: async (pathArg, modeArg) => {
     const path = pathArg ?? get().path;

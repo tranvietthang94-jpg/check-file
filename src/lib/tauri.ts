@@ -171,6 +171,20 @@ export function verifyMhl(path: string): Promise<MhlVerifyReport> {
   return invoke<MhlVerifyReport>("verify_mhl", { path });
 }
 
+export function repairMhlEntry(
+  mhlPath: string,
+  relativePath: string,
+  sourceRoot: string,
+  approved: boolean,
+): Promise<MhlVerifyReport> {
+  return invoke<MhlVerifyReport>("repair_mhl_entry", {
+    mhlPath,
+    relativePath,
+    sourceRoot,
+    approved,
+  });
+}
+
 /** Verifies every .mhl file found directly inside `folder`. */
 export function verifyMhlsInFolder(folder: string): Promise<MhlVerifyReport[]> {
   return invoke<MhlVerifyReport[]>("verify_mhls_in_folder", { folder });

@@ -24,7 +24,15 @@ const STATUS_TONE: Record<MhlEntryStatus, BadgeTone> = {
   noChecksumRecorded: "neutral",
 };
 
-function ReportCard({ report }: { report: MhlVerifyReport }) {
+function ReportCard({
+  report,
+  busy,
+  onRepair,
+}: {
+  report: MhlVerifyReport;
+  busy: boolean;
+  onRepair: (relativePath: string) => void;
+}) {
   const problems = report.results.filter((r) => r.status !== "verified" && r.status !== "noChecksumRecorded");
   return (
     <Panel className="px-2 py-1.5 text-xs">
@@ -42,7 +50,19 @@ function ReportCard({ report }: { report: MhlVerifyReport }) {
         {report.results.map((r) => (
           <li key={r.relativePath} className="flex items-center justify-between gap-2">
             <span className="truncate text-neutral-400">{r.relativePath}</span>
-            <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
+            <span className="flex items-center gap-1">
+              <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
+              {r.status !== "verified" && r.status !== "noChecksumRecorded" && (
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => onRepair(r.relativePath)}
+                  className="w-fit px-1.5 py-0.5 text-[10px]"
+                >
+                  Sửa
+                </Button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -59,6 +79,14 @@ export function MhlVerifyPanel() {
   const setPath = useMhlVerifyStore((s) => s.setPath);
   const setMode = useMhlVerifyStore((s) => s.setMode);
   const runVerify = useMhlVerifyStore((s) => s.runVerify);
+  const repairEntry = useMhlVerifyStore((s) => s.repairEntry);
+
+  const requestRepair = (report: MhlVerifyReport, relativePath: string) => {
+    const sourceRoot = window.prompt("Thư mục chứa bản gốc đã xác minh:");
+    if (!sourceRoot?.trim()) return;
+    if (!window.confirm(`Thay ${relativePath} bằng bản đã xác minh và giữ bản lỗi làm evidence?`)) return;
+    void repairEntry(report.mhlPath, relativePath, sourceRoot.trim());
+  };
 
   return (
     <section className="col-span-full flex flex-col gap-2">
@@ -111,7 +139,14 @@ export function MhlVerifyPanel() {
               Không tìm thấy tệp .mhl nào ở đó.
             </EmptyState>
           ) : (
-            reports.map((report) => <ReportCard key={report.mhlPath} report={report} />)
+            reports.map((report) => (
+              <ReportCard
+                key={report.mhlPath}
+                report={report}
+                busy={busy}
+                onRepair={(relativePath) => requestRepair(report, relativePath)}
+              />
+            ))
           )}
         </div>
       )}

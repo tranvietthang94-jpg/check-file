@@ -139,6 +139,22 @@ pub fn verify_mhl(path: String) -> Result<MhlVerifyReport, String> {
     mhl::verify_mhl_file(&PathBuf::from(path)).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn repair_mhl_entry(
+    mhl_path: String,
+    relative_path: String,
+    source_root: String,
+    approved: bool,
+) -> Result<MhlVerifyReport, String> {
+    mhl::repair_mhl_entry_from_report(
+        &PathBuf::from(mhl_path),
+        &PathBuf::from(relative_path),
+        &PathBuf::from(source_root),
+        approved,
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Verifies every `.mhl` file found directly inside `folder` -- the "verify
 /// all MHLs on this drive/folder" batch action.
 #[tauri::command]

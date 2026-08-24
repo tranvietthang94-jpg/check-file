@@ -442,6 +442,104 @@ fn verify_entry_against_disk(entry: &ParsedMhlEntry, root: &Path) -> MhlEntrySta
     }
 }
 
+pub fn repair_mhl_entry(
+    destination_root: &Path,
+    relative_path: &Path,
+    source_root: &Path,
+    algorithm: ChecksumAlgorithm,
+    expected_checksum: &str,
+    approved: bool,
+) -> io::Result<()> {
+    if !approved {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "repair requires explicit approval",
+        ));
+    }
+    if relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "repair path must stay inside its roots",
+        ));
+    }
+
+    let source = source_root.join(relative_path);
+    let destination = destination_root.join(relative_path);
+    let actual = checksum::hash_file(&source, algorithm)?;
+    if !actual.eq_ignore_ascii_case(expected_checksum) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "repair source checksum does not match the MHL",
+        ));
+    }
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut staging_name = destination.file_name().unwrap_or_default().to_os_string();
+    staging_name.push(".ofkit-repair");
+    let staging = destination.with_file_name(staging_name);
+    let result = (|| {
+        fs::copy(&source, &staging)?;
+        let copied = checksum::hash_file(&staging, algorithm)?;
+        if !copied.eq_ignore_ascii_case(expected_checksum) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "repaired staging file failed verification",
+            ));
+        }
+        if destination.exists() {
+            let mut evidence_name = destination.file_name().unwrap_or_default().to_os_string();
+            evidence_name.push(".ofkit-corrupt");
+            let evidence = destination.with_file_name(evidence_name);
+            if evidence.exists() {
+                fs::remove_file(&evidence)?;
+            }
+            fs::rename(&destination, evidence)?;
+        }
+        fs::rename(&staging, &destination)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(staging);
+    }
+    result
+}
+
+pub fn repair_mhl_entry_from_report(
+    mhl_path: &Path,
+    relative_path: &Path,
+    source_root: &Path,
+    approved: bool,
+) -> io::Result<MhlVerifyReport> {
+    let xml = fs::read_to_string(mhl_path)?;
+    let entries = parse_mhl(&xml)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let entry = entries
+        .into_iter()
+        .find(|entry| Path::new(&entry.relative_path) == relative_path)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file is not recorded in the MHL"))?;
+    let algorithm = entry
+        .algorithm
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MHL entry has no checksum"))?;
+    let expected = entry
+        .checksum
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MHL entry has no checksum"))?;
+    let destination_root = mhl_path.parent().unwrap_or_else(|| Path::new(""));
+    repair_mhl_entry(
+        destination_root,
+        relative_path,
+        source_root,
+        algorithm,
+        &expected,
+        approved,
+    )?;
+    verify_mhl_file(mhl_path)
+}
+
 /// Finds every `.mhl` file directly inside `folder` and verifies each one
 /// independently -- the "verify all MHLs on this drive/folder" batch action.
 pub fn verify_mhls_in_folder(folder: &Path) -> io::Result<Vec<MhlVerifyReport>> {
@@ -668,6 +766,65 @@ mod tests {
             ),
             None,
             "an MHL checksum in a different algorithm can't stand in for the requested one"
+        );
+    }
+
+    #[test]
+    fn repair_replaces_a_corrupt_destination_from_an_explicit_good_source() {
+        let destination = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        fs::write(destination.path().join("clip.mov"), b"bad bytes").unwrap();
+        fs::write(source.path().join("clip.mov"), b"known good bytes").unwrap();
+        let expected = checksum::hash_file(
+            &source.path().join("clip.mov"),
+            ChecksumAlgorithm::Xxh64,
+        )
+        .unwrap();
+
+        repair_mhl_entry(
+            destination.path(),
+            Path::new("clip.mov"),
+            source.path(),
+            ChecksumAlgorithm::Xxh64,
+            &expected,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(destination.path().join("clip.mov")).unwrap(),
+            b"known good bytes"
+        );
+        assert_eq!(
+            fs::read(destination.path().join("clip.mov.ofkit-corrupt")).unwrap(),
+            b"bad bytes"
+        );
+    }
+
+    #[test]
+    fn repair_requires_explicit_approval_before_replacing_a_file() {
+        let destination = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        fs::write(destination.path().join("clip.mov"), b"bad bytes").unwrap();
+        fs::write(source.path().join("clip.mov"), b"known good bytes").unwrap();
+        let expected = checksum::hash_file(
+            &source.path().join("clip.mov"),
+            ChecksumAlgorithm::Xxh64,
+        )
+        .unwrap();
+
+        assert!(repair_mhl_entry(
+            destination.path(),
+            Path::new("clip.mov"),
+            source.path(),
+            ChecksumAlgorithm::Xxh64,
+            &expected,
+            false,
+        )
+        .is_err());
+        assert_eq!(
+            fs::read(destination.path().join("clip.mov")).unwrap(),
+            b"bad bytes"
         );
     }
 
