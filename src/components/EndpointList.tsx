@@ -39,7 +39,7 @@ interface EndpointListProps {
   onDropDisk?: (diskId: string) => void;
   /** Drag one row onto another to reorder the list in place -- only wired
    * up for Destinations, where list order doubles as Cascade hop order. */
-  onReorder?: (fromDiskId: string, toDiskId: string) => void;
+  onReorder?: (fromDiskId: string, toDiskId: string, placement?: "before" | "after") => void;
 }
 
 export function EndpointList({
@@ -55,7 +55,7 @@ export function EndpointList({
   onReorder,
 }: EndpointListProps) {
   const [dragOver, setDragOver] = useState(false);
-  const [reorderOverId, setReorderOverId] = useState<string | null>(null);
+  const [reorderOver, setReorderOver] = useState<{ diskId: string; placement: "before" | "after" } | null>(null);
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; diskId: string } | null>(
@@ -200,17 +200,20 @@ export function EndpointList({
                 if (!onReorder) return;
                 e.preventDefault();
                 e.stopPropagation();
-                setReorderOverId(endpoint.diskId);
+                const rect = e.currentTarget.getBoundingClientRect();
+                const placement = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                setReorderOver({ diskId: endpoint.diskId, placement });
               }}
-              onDragLeave={() => setReorderOverId((cur) => (cur === endpoint.diskId ? null : cur))}
+              onDragLeave={() => setReorderOver((cur) => (cur?.diskId === endpoint.diskId ? null : cur))}
               onDrop={(e) => {
                 if (!onReorder) return;
                 const fromDiskId = e.dataTransfer.getData(ENDPOINT_REORDER_MIME);
                 if (!fromDiskId) return;
                 e.preventDefault();
                 e.stopPropagation();
-                setReorderOverId(null);
-                onReorder(fromDiskId, endpoint.diskId);
+                const placement = reorderOver?.diskId === endpoint.diskId ? reorderOver.placement : "before";
+                setReorderOver(null);
+                onReorder(fromDiskId, endpoint.diskId, placement);
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -218,11 +221,17 @@ export function EndpointList({
               }}
               title="Kéo để sắp thứ tự (Nối tiếp), hoặc chuột phải để xem thêm thao tác"
               className={`group relative flex items-center gap-2 rounded border px-3 py-2 ${
-                reorderOverId === endpoint.diskId
-                  ? "border-blue-500 bg-blue-500/10"
+                reorderOver?.diskId === endpoint.diskId
+                  ? "border-neutral-800 bg-neutral-900"
                   : "border-neutral-800 bg-neutral-900"
               } ${onReorder ? "cursor-grab active:cursor-grabbing" : ""}`}
             >
+              {reorderOver?.diskId === endpoint.diskId && reorderOver.placement === "before" && (
+                <span data-testid="destination-insertion-before" className="absolute -top-1 left-1 right-1 h-0.5 bg-blue-500" />
+              )}
+              {reorderOver?.diskId === endpoint.diskId && reorderOver.placement === "after" && (
+                <span data-testid="destination-insertion-after" className="absolute -bottom-1 left-1 right-1 h-0.5 bg-blue-500" />
+              )}
               {onReorder && (
                 <span className="shrink-0 text-neutral-600" aria-hidden="true">
                   {index + 1}.

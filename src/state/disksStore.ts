@@ -34,7 +34,7 @@ interface DisksState {
    * the Cascade hop order now that "Add N Transfers" builds a cascade chain
    * straight from the live Destinations list instead of a per-click
    * composer form. */
-  reorderDestinations: (fromDiskId: string, toDiskId: string) => void;
+  reorderDestinations: (fromDiskId: string, toDiskId: string, placement?: "before" | "after") => void;
   /** The disk context menu's "Cascade from ▶ [existing destination]" --
    * adds `diskId` as a Destination (if it isn't already one) positioned
    * right after `afterDiskId` in the list, i.e. it now receives from that
@@ -138,15 +138,16 @@ export const useDisksStore = create<DisksState>((set, get) => ({
       ),
     })),
 
-  reorderDestinations: (fromDiskId, toDiskId) =>
+  reorderDestinations: (fromDiskId, toDiskId, placement = "before") =>
     set((state) => {
       if (fromDiskId === toDiskId) return state;
       const fromIndex = state.destinations.findIndex((d) => d.diskId === fromDiskId);
-      const toIndex = state.destinations.findIndex((d) => d.diskId === toDiskId);
-      if (fromIndex === -1 || toIndex === -1) return state;
+      const targetIndex = state.destinations.findIndex((d) => d.diskId === toDiskId);
+      if (fromIndex === -1 || targetIndex === -1) return state;
       const next = [...state.destinations];
       const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
+      const adjustedTargetIndex = next.findIndex((d) => d.diskId === toDiskId);
+      next.splice(adjustedTargetIndex + (placement === "after" ? 1 : 0), 0, moved);
       return { destinations: next };
     }),
 
