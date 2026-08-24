@@ -75,7 +75,7 @@ export const referenceJobs: Record<string, TransferJob> = {
 };
 
 export const autoEjectJobs: Record<string, TransferJob> = {
-  complete: job("auto-eject-complete", "complete", {
+  "auto-eject-complete": job("auto-eject-complete", "complete", {
     groupId: "auto-eject-group",
     sourcePath: "D:\\",
     bytesCopied: 100_000_000,
@@ -89,7 +89,17 @@ export const autoEjectGroups: Record<string, TransferGroup> = {
     mode: "parallel",
     sourceLabel: "KHANH VAN",
     destinationLabels: ["DATA"],
+    expectedJobCount: 1,
     jobIds: ["auto-eject-complete"],
+  },
+};
+
+export const autoEjectPendingGroups: Record<string, TransferGroup> = {
+  "auto-eject-group": {
+    ...autoEjectGroups["auto-eject-group"],
+    mode: "cascade",
+    destinationLabels: ["DATA", "BACKUP"],
+    expectedJobCount: 2,
   },
 };
 
@@ -99,12 +109,13 @@ export const referenceGroups: Record<string, TransferGroup> = {
     mode: "parallel",
     sourceLabel: "CAM A",
     destinationLabels: ["DATA", "BACKUP A", "BACKUP B", "BACKUP C"],
+    expectedJobCount: 4,
     jobIds: ["queued", "copying", "complete", "failed"],
   },
 };
 
-export function referenceFixture(): "disks" | "transfers" | "autoEject" | null {
+export function referenceFixture(): "disks" | "transfers" | "autoEject" | "autoEjectPending" | null {
   if (!import.meta.env.DEV) return null;
   const fixture = new URLSearchParams(window.location.search).get("referenceFixture");
-  return fixture === "disks" || fixture === "transfers" || fixture === "autoEject" ? fixture : null;
+  return fixture === "disks" || fixture === "transfers" || fixture === "autoEject" || fixture === "autoEjectPending" ? fixture : null;
 }

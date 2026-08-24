@@ -50,6 +50,7 @@ import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/med
 import {
   autoEjectGroups,
   autoEjectJobs,
+  autoEjectPendingGroups,
   referenceDestinations,
   referenceDisks,
   referenceFixture,
@@ -201,9 +202,9 @@ function App() {
         setJobs(referenceJobs);
         setGroups(referenceGroups);
         setView("transfers");
-      } else if (fixture === "autoEject") {
+      } else if (fixture === "autoEject" || fixture === "autoEjectPending") {
         setJobs(autoEjectJobs);
-        setGroups(autoEjectGroups);
+        setGroups(fixture === "autoEject" ? autoEjectGroups : autoEjectPendingGroups);
         setView("transfers");
       }
       return;
@@ -340,7 +341,12 @@ function App() {
   useEffect(() => {
     if (!autoEjectEnabled) return;
     for (const group of Object.values(groups)) {
-      if (autoEjectedGroups.current.has(group.id) || group.jobIds.length === 0) continue;
+      if (
+        autoEjectedGroups.current.has(group.id) ||
+        group.expectedJobCount === 0 ||
+        group.jobIds.length !== group.expectedJobCount
+      )
+        continue;
       const groupJobs = group.jobIds.map((id) => jobs[id]);
       if (groupJobs.some((job) => !job || job.status !== "complete")) continue;
       if (
@@ -354,12 +360,18 @@ function App() {
       )
         continue;
       const sourcePath = groupJobs[0].sourcePath;
-      const disk = disks.find(
-        (candidate) => candidate.isRemovable && sourcePath.startsWith(candidate.mountPoint),
-      );
+      const normalizedSource = sourcePath.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+      const disk = disks.find((candidate) => {
+        if (!candidate.isRemovable) return false;
+        const mount = candidate.mountPoint.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+        return normalizedSource === mount || normalizedSource.startsWith(`${mount}/`);
+      });
       if (!disk) continue;
       autoEjectedGroups.current.add(group.id);
-      ejectDisk(disk.mountPoint).catch((error) => {
+      const testEject = (window as Window & { __OFFLOADKIT_TEST_EJECT__?: (mount: string) => void })
+        .__OFFLOADKIT_TEST_EJECT__;
+      const eject = testEject ? Promise.resolve(testEject(disk.mountPoint)) : ejectDisk(disk.mountPoint);
+      eject.catch((error) => {
         autoEjectedGroups.current.delete(group.id);
         console.error(error);
       });

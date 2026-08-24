@@ -84,6 +84,11 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "offloadkit-settings-v1",
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        setPreventSleepEnabled(state.preventSleep).catch(console.error);
+        setQueueModeBackend(state.queueMode).catch(console.error);
+      },
       partialize: (state) => ({
         verificationMode: state.verificationMode,
         checksumAlgorithm: state.checksumAlgorithm,

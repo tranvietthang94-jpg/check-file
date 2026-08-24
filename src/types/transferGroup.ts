@@ -5,6 +5,7 @@ export interface TransferGroup {
   mode: TransferGroupMode;
   sourceLabel: string;
   destinationLabels: string[];
+  expectedJobCount: number;
   jobIds: string[];
 }
 

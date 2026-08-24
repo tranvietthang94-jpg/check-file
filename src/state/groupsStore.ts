@@ -22,7 +22,7 @@ interface GroupsState {
 }
 
 function emptyGroup(id: string): TransferGroup {
-  return { id, mode: "parallel", sourceLabel: "", destinationLabels: [], jobIds: [] };
+  return { id, mode: "parallel", sourceLabel: "", destinationLabels: [], expectedJobCount: 0, jobIds: [] };
 }
 
 export const useGroupsStore = create<GroupsState>((set) => ({
@@ -35,7 +35,13 @@ export const useGroupsStore = create<GroupsState>((set) => ({
       return {
         groups: {
           ...state.groups,
-          [id]: { ...existing, mode, sourceLabel, destinationLabels },
+          [id]: {
+            ...existing,
+            mode,
+            sourceLabel,
+            destinationLabels,
+            expectedJobCount: destinationLabels.length,
+          },
         },
       };
     }),
