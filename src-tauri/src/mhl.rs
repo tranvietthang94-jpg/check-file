@@ -522,6 +522,7 @@ pub fn repair_mhl_entry(
 
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
+        crate::path_safety::revalidate_destination(destination_root, parent)?;
     }
     let mut staging_name = destination.file_name().unwrap_or_default().to_os_string();
     staging_name.push(".ofkit-repair");
@@ -535,16 +536,39 @@ pub fn repair_mhl_entry(
                 "repaired staging file failed verification",
             ));
         }
-        if destination.exists() {
-            let mut evidence_name = destination.file_name().unwrap_or_default().to_os_string();
-            evidence_name.push(".ofkit-corrupt");
-            let evidence = destination.with_file_name(evidence_name);
-            if evidence.exists() {
-                fs::remove_file(&evidence)?;
-            }
-            fs::rename(&destination, evidence)?;
+        let mut evidence = destination.with_file_name({
+            let mut name = destination.file_name().unwrap_or_default().to_os_string();
+            name.push(".ofkit-corrupt");
+            name
+        });
+        let mut counter = 2;
+        while evidence.exists() {
+            let mut name = destination.file_name().unwrap_or_default().to_os_string();
+            name.push(format!(".ofkit-corrupt.{counter}"));
+            evidence = destination.with_file_name(name);
+            counter += 1;
         }
-        crate::atomic_file::replace_file(&staging, &destination)
+        crate::path_safety::revalidate_destination(destination_root, &destination)?;
+        let had_destination = destination.exists();
+        if had_destination {
+            fs::rename(&destination, &evidence)?;
+        }
+        crate::path_safety::revalidate_destination(destination_root, &destination)?;
+        if let Err(err) = crate::atomic_file::replace_file(&staging, &destination) {
+            if had_destination {
+                if let Err(restore_err) = fs::rename(&evidence, &destination) {
+                    return Err(io::Error::new(
+                        restore_err.kind(),
+                        format!(
+                            "repair install failed: {err}; restoring corrupt original also failed: {restore_err}; evidence remains at {}",
+                            evidence.display()
+                        ),
+                    ));
+                }
+            }
+            return Err(err);
+        }
+        Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(staging);
@@ -897,6 +921,43 @@ mod tests {
         )
         .is_err());
         assert!(!outside.join("clip.mov").exists());
+    }
+
+    #[test]
+    fn repair_preserves_previous_evidence_with_a_unique_name() {
+        let destination = tempfile::tempdir().unwrap();
+        let source = tempfile::tempdir().unwrap();
+        fs::write(destination.path().join("clip.mov"), b"current bad bytes").unwrap();
+        fs::write(
+            destination.path().join("clip.mov.ofkit-corrupt"),
+            b"older bad bytes",
+        )
+        .unwrap();
+        fs::write(source.path().join("clip.mov"), b"known good bytes").unwrap();
+        let expected = checksum::hash_file(
+            &source.path().join("clip.mov"),
+            ChecksumAlgorithm::Xxh64,
+        )
+        .unwrap();
+
+        repair_mhl_entry(
+            destination.path(),
+            Path::new("clip.mov"),
+            source.path(),
+            ChecksumAlgorithm::Xxh64,
+            &expected,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(destination.path().join("clip.mov.ofkit-corrupt")).unwrap(),
+            b"older bad bytes"
+        );
+        assert_eq!(
+            fs::read(destination.path().join("clip.mov.ofkit-corrupt.2")).unwrap(),
+            b"current bad bytes"
+        );
     }
 
     #[test]

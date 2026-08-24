@@ -68,9 +68,22 @@ fn try_move_delete_source(
     deleted_source_files: &mut Vec<String>,
     move_delete_failed: &mut Vec<FailedFile>,
 ) {
-    match checksum::verify_file_hash(absolute, expected_checksum, algorithm) {
+    let quarantine = absolute.with_file_name(format!(
+        "{}.{}.ofkit-move-check",
+        absolute.file_name().unwrap_or_default().to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+    if let Err(err) = fs::rename(absolute, &quarantine) {
+        move_delete_failed.push(FailedFile {
+            path: relative_display.to_string(),
+            message: format!("could not secure source before deletion: {err}"),
+        });
+        return;
+    }
+    match checksum::verify_file_hash(&quarantine, expected_checksum, algorithm) {
         Ok(true) => {}
         Ok(false) => {
+            let _ = fs::rename(&quarantine, absolute);
             move_delete_failed.push(FailedFile {
                 path: relative_display.to_string(),
                 message: "source changed after verification; refusing to delete it".to_string(),
@@ -78,6 +91,7 @@ fn try_move_delete_source(
             return;
         }
         Err(err) => {
+            let _ = fs::rename(&quarantine, absolute);
             move_delete_failed.push(FailedFile {
                 path: relative_display.to_string(),
                 message: format!("could not re-verify source before deletion: {err}"),
@@ -85,12 +99,15 @@ fn try_move_delete_source(
             return;
         }
     }
-    match fs::remove_file(absolute) {
+    match fs::remove_file(&quarantine) {
         Ok(()) => deleted_source_files.push(relative_display.to_string()),
-        Err(err) => move_delete_failed.push(FailedFile {
-            path: relative_display.to_string(),
-            message: err.to_string(),
-        }),
+        Err(err) => {
+            let _ = fs::rename(&quarantine, absolute);
+            move_delete_failed.push(FailedFile {
+                path: relative_display.to_string(),
+                message: err.to_string(),
+            });
+        }
     }
 }
 
@@ -751,6 +768,13 @@ pub fn run_copy_core(
                 });
                 continue;
             }
+            if let Err(err) = crate::path_safety::revalidate_destination(destination, parent) {
+                failed_files.push(FailedFile {
+                    path: organized_relative.display().to_string(),
+                    message: err.to_string(),
+                });
+                continue;
+            }
         }
 
         let relative_display = organized_relative.display().to_string();
@@ -899,6 +923,13 @@ pub fn run_copy_core(
             } else {
                 (known_hash.clone(), None)
             };
+            if let Err(err) = crate::path_safety::revalidate_destination(destination, &dest_path) {
+                failed_files.push(FailedFile {
+                    path: copy_display,
+                    message: err.to_string(),
+                });
+                continue;
+            }
             match fs::rename(&entry.absolute, &dest_path) {
                 Ok(()) => {
                     tracker.add_bytes(entry.size, &copy_display);
@@ -1018,6 +1049,14 @@ pub fn run_copy_core(
                 };
 
                 if verified_ok {
+                    if let Err(err) = crate::path_safety::revalidate_destination(destination, &dest_path) {
+                        failed_files.push(FailedFile {
+                            path: copy_display.clone(),
+                            message: err.to_string(),
+                        });
+                        let _ = fs::remove_file(&staging_path);
+                        continue;
+                    }
                     match fs::rename(&staging_path, &dest_path) {
                         Ok(()) => {
                             if let Some(hash) = &source_hash {

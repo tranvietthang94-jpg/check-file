@@ -24,6 +24,13 @@ pub fn safe_destination(root: &Path, relative: &Path) -> io::Result<PathBuf> {
     Ok(current)
 }
 
+pub fn revalidate_destination(root: &Path, path: &Path) -> io::Result<()> {
+    let relative = path.strip_prefix(root).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "destination path escaped its root")
+    })?;
+    safe_destination(root, relative).map(|_| ())
+}
+
 fn reject_link(path: &Path) -> io::Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
