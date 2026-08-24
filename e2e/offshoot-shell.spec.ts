@@ -30,4 +30,25 @@ test("reference fixture renders OffShoot-style three-column shell", async ({ pag
 
   await expect(page.getByText("KHANH VAN", { exact: false })).toBeVisible();
   await expect(page.getByText("DATA", { exact: false })).toBeVisible();
+
+  const diskGrid = page.getByTestId("available-disk-grid");
+  const diskCards = page.getByTestId("available-disk-card");
+  await expect(diskCards).toHaveCount(7);
+  await expect(page.getByTestId("available-disk-card").filter({ hasText: "DATA" })).toHaveCount(0);
+
+  const [gridBox, firstCardBox, secondCardBox, fourthCardBox] = await Promise.all([
+    diskGrid.boundingBox(),
+    diskCards.nth(0).boundingBox(),
+    diskCards.nth(1).boundingBox(),
+    diskCards.nth(3).boundingBox(),
+  ]);
+  expect(gridBox).not.toBeNull();
+  expect(firstCardBox).not.toBeNull();
+  expect(secondCardBox).not.toBeNull();
+  expect(fourthCardBox).not.toBeNull();
+  expect(firstCardBox!.width).toBeGreaterThanOrEqual(140);
+  expect(firstCardBox!.height).toBeGreaterThanOrEqual(145);
+  expect(Math.abs(firstCardBox!.y - secondCardBox!.y)).toBeLessThan(2);
+  expect(fourthCardBox!.y).toBeGreaterThan(firstCardBox!.y + firstCardBox!.height);
+  expect(gridBox!.width).toBeGreaterThan(firstCardBox!.width * 3);
 });

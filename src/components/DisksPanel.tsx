@@ -266,12 +266,16 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
           Mọi ổ đĩa đã được gán làm Nguồn hoặc Đích.
         </EmptyState>
       )}
-      <ul className="flex flex-wrap gap-3">
+      <ul
+        data-testid="available-disk-grid"
+        className="grid grid-cols-3 content-start gap-x-4 gap-y-5 overflow-y-auto px-2 py-3"
+      >
         {availableDisks.map((disk) => {
           return (
             <Panel
               as="li"
               key={disk.id}
+              data-testid="available-disk-card"
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData(DISK_DRAG_MIME, disk.id);
@@ -282,7 +286,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                 setContextMenu({ x: e.clientX, y: e.clientY, diskId: disk.id });
               }}
               title="Kéo vào Nguồn/Đích, hoặc chuột phải để xem thêm thao tác"
-              className="group relative flex w-32 cursor-grab flex-col items-center gap-1 px-3 py-3 text-center active:cursor-grabbing"
+              className="group relative flex min-h-40 min-w-0 cursor-grab flex-col items-center justify-center gap-2 rounded-md border-transparent bg-transparent px-3 py-4 text-center shadow-none hover:border-neutral-700 hover:bg-neutral-800/40 active:cursor-grabbing"
             >
               <div className="flex w-full flex-col items-center gap-1">
                 <IconButton
@@ -296,7 +300,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
                     setContextMenu({ x: rect.right - 200, y: rect.bottom + 4, diskId: disk.id });
                   }}
                 />
-                <DriveIcon removable={disk.isRemovable} className="h-8 w-8 text-neutral-400" />
+                <DriveIcon removable={disk.isRemovable} className="h-12 w-12 text-neutral-400" />
                 {editingLabelDiskId === disk.id ? (
                   <input
                     autoFocus
