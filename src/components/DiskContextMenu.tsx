@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 export interface DiskContextMenuItem {
@@ -34,6 +34,7 @@ function MenuItems({
 
   return (
     <div
+      role="menu"
       className="min-w-[200px] rounded border border-neutral-700 bg-neutral-900 py-1 text-xs shadow-lg"
       onClick={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.preventDefault()}
@@ -42,6 +43,8 @@ function MenuItems({
         <div key={i} className="relative" onMouseEnter={() => setOpenIndex(i)}>
           <button
             type="button"
+            role="menuitem"
+            tabIndex={-1}
             disabled={item.disabled}
             onClick={() => {
               if (item.children) return;
@@ -70,12 +73,45 @@ function MenuItems({
 }
 
 export function DiskContextMenu({ x, y, items, onClose }: DiskContextMenuProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ x, y });
+
+  useLayoutEffect(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPosition({
+      x: Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)),
+    });
+  }, [x, y]);
+
   useEffect(() => {
+    function enabledItems() {
+      return Array.from(
+        containerRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
+      );
+    }
     function handleWindowClick() {
       onClose();
     }
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+      e.preventDefault();
+      const buttons = enabledItems();
+      if (buttons.length === 0) return;
+      const activeIndex = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const nextIndex = e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? buttons.length - 1
+          : e.key === "ArrowDown"
+            ? (activeIndex + 1 + buttons.length) % buttons.length
+            : (activeIndex - 1 + buttons.length) % buttons.length;
+      buttons[nextIndex].focus();
     }
     window.addEventListener("keydown", handleKeyDown);
     // The click/right-click that *opens* this menu is often still bubbling
@@ -97,7 +133,7 @@ export function DiskContextMenu({ x, y, items, onClose }: DiskContextMenuProps) 
   }, [onClose]);
 
   return (
-    <div className="fixed z-50" style={{ left: x, top: y }}>
+    <div ref={containerRef} className="fixed z-50" style={{ left: position.x, top: position.y }}>
       <MenuItems items={items} onClose={onClose} />
     </div>
   );

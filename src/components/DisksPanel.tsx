@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { useDisksStore } from "../state/disksStore";
@@ -71,6 +71,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
   const [renamingDiskId, setRenamingDiskId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState<Record<string, string>>({});
+  const contextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
 
   // Renames the actual OS volume (Win32 SetVolumeLabelW / macOS `diskutil
   // rename`) -- distinct from the app-only "Label" above, which never
@@ -276,6 +277,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
               as="li"
               key={disk.id}
               data-testid="available-disk-card"
+              tabIndex={0}
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData(DISK_DRAG_MIME, disk.id);
@@ -283,6 +285,7 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
+                contextMenuReturnFocusRef.current = e.currentTarget;
                 setContextMenu({ x: e.clientX, y: e.clientY, diskId: disk.id });
               }}
               title="Kéo vào Nguồn/Đích, hoặc chuột phải để xem thêm thao tác"
@@ -367,7 +370,10 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
           x={contextMenu.x}
           y={contextMenu.y}
           items={buildMenuItems(contextMenuDisk)}
-          onClose={() => setContextMenu(null)}
+          onClose={() => {
+            setContextMenu(null);
+            requestAnimationFrame(() => contextMenuReturnFocusRef.current?.focus());
+          }}
         />
       )}
     </Panel>
