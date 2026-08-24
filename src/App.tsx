@@ -44,6 +44,12 @@ import type { DiskInfo, Endpoint } from "./types/disk";
 import type { TransferJob } from "./types/job";
 import type { GroupJobAddedEventPayload, TransferGroup, TransferGroupMode } from "./types/transferGroup";
 import type { MediaScanCompletePayload, MediaScanItemPayload } from "./types/media";
+import {
+  isReferenceFixtureEnabled,
+  referenceDestinations,
+  referenceDisks,
+  referenceSources,
+} from "./dev/referenceFixtures";
 import "./App.css";
 
 function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
@@ -65,6 +71,7 @@ function App() {
   const sources = useDisksStore((s) => s.sources);
   const destinations = useDisksStore((s) => s.destinations);
   const setDisks = useDisksStore((s) => s.setDisks);
+  const setEndpoints = useDisksStore((s) => s.setEndpoints);
   const addSource = useDisksStore((s) => s.addSource);
   const addDestination = useDisksStore((s) => s.addDestination);
   const removeSource = useDisksStore((s) => s.removeSource);
@@ -145,6 +152,12 @@ function App() {
   };
 
   useEffect(() => {
+    if (isReferenceFixtureEnabled()) {
+      setDisks(referenceDisks);
+      setEndpoints(referenceSources, referenceDestinations);
+      return;
+    }
+
     let unlisten: (() => void) | undefined;
 
     listDisks().then(setDisks).catch(console.error);
@@ -153,7 +166,7 @@ function App() {
     });
 
     return () => unlisten?.();
-  }, [setDisks]);
+  }, [setDisks, setEndpoints]);
 
   useEffect(() => {
     function handleGroupJobAdded(payload: GroupJobAddedEventPayload) {
@@ -446,31 +459,38 @@ function App() {
       )}
 
       {view === "disks" ? (
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-          <EndpointList
-            title="Nguồn"
-            endpoints={sources}
-            disks={disks}
-            onRemove={removeSource}
-            onLabelChange={setSourceLabel}
-            onPathChange={setSourcePath}
-            onBrowse={handleBrowse}
-            onDropDisk={addSource}
-          />
-          <div className="md:col-span-2">
+        <div
+          data-testid="disks-shell"
+          className="grid grid-cols-[220px_minmax(0,1fr)_220px] gap-0 overflow-hidden"
+        >
+          <div data-testid="sources-column" className="min-w-0">
+            <EndpointList
+              title="Nguồn"
+              endpoints={sources}
+              disks={disks}
+              onRemove={removeSource}
+              onLabelChange={setSourceLabel}
+              onPathChange={setSourcePath}
+              onBrowse={handleBrowse}
+              onDropDisk={addSource}
+            />
+          </div>
+          <div data-testid="disks-column" className="min-w-0">
             <DisksPanel onVerifyRequested={() => setView("transfers")} />
           </div>
-          <EndpointList
-            title="Đích"
-            endpoints={destinations}
-            disks={disks}
-            onRemove={removeDestination}
-            onLabelChange={setDestinationLabel}
-            onPathChange={setDestinationPath}
-            usageKind="free"
-            onDropDisk={addDestination}
-            onReorder={reorderDestinations}
-          />
+          <div data-testid="destinations-column" className="min-w-0">
+            <EndpointList
+              title="Đích"
+              endpoints={destinations}
+              disks={disks}
+              onRemove={removeDestination}
+              onLabelChange={setDestinationLabel}
+              onPathChange={setDestinationPath}
+              usageKind="free"
+              onDropDisk={addDestination}
+              onReorder={reorderDestinations}
+            />
+          </div>
           <ElementsReviewPanel />
         </div>
       ) : (

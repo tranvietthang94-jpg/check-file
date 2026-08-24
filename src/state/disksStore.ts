@@ -14,6 +14,7 @@ interface DisksState {
   hideDisk: (diskId: string) => void;
   unhideDisk: (diskId: string) => void;
   setDisks: (disks: DiskInfo[]) => void;
+  setEndpoints: (sources: Endpoint[], destinations: Endpoint[]) => void;
   addSource: (diskId: string) => void;
   addDestination: (diskId: string) => void;
   removeSource: (diskId: string) => void;
@@ -61,6 +62,7 @@ export const useDisksStore = create<DisksState>((set, get) => ({
     })),
 
   setDisks: (disks) => set({ disks }),
+  setEndpoints: (sources, destinations) => set({ sources, destinations }),
 
   addSource: (diskId) => {
     set((state) => {
