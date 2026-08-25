@@ -44,6 +44,7 @@ pub struct ExplorerIntegrationStatus {
     pub expected_commands: usize,
     pub matching_commands: usize,
     pub problems: Vec<String>,
+    pub message: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -241,6 +242,7 @@ fn integration_status_with_registry<R: RegistryAccess>(
     }
 
     let healthy = matching_commands == explorer_verbs().len();
+    let message = (!problems.is_empty()).then(|| problems.join("; "));
     Ok(ExplorerIntegrationStatus {
         supported: cfg!(windows),
         installed: healthy,
@@ -249,6 +251,7 @@ fn integration_status_with_registry<R: RegistryAccess>(
         expected_commands: explorer_verbs().len(),
         matching_commands,
         problems,
+        message,
     })
 }
 
@@ -423,7 +426,26 @@ pub fn explorer_integration_status_for_current_user(
         expected_commands: 0,
         matching_commands: 0,
         problems: vec!["Windows Explorer integration is only available on Windows".to_owned()],
+        message: Some("Windows Explorer integration is only available on Windows".to_owned()),
     })
+}
+
+#[tauri::command]
+pub fn install_explorer_integration() -> Result<ExplorerIntegrationStatus, ExplorerIntegrationError>
+{
+    install_explorer_integration_for_current_user()
+}
+
+#[tauri::command]
+pub fn uninstall_explorer_integration(
+) -> Result<ExplorerIntegrationStatus, ExplorerIntegrationError> {
+    uninstall_explorer_integration_for_current_user()
+}
+
+#[tauri::command]
+pub fn explorer_integration_status() -> Result<ExplorerIntegrationStatus, ExplorerIntegrationError>
+{
+    explorer_integration_status_for_current_user()
 }
 
 #[cfg(windows)]
@@ -531,9 +553,8 @@ mod windows_registry {
     pub fn key_exists(key: &str) -> Result<bool, RegistryAccessError> {
         let key = wide(key);
         let mut handle = ptr::null_mut();
-        let status = unsafe {
-            RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_READ, &mut handle)
-        };
+        let status =
+            unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_READ, &mut handle) };
         match status {
             ERROR_SUCCESS => {
                 drop(OpenKey(handle));
@@ -576,10 +597,7 @@ mod windows_registry {
         }
     }
 
-    pub fn get_string(
-        key: &str,
-        value_name: Option<&str>,
-    ) -> Result<String, RegistryAccessError> {
+    pub fn get_string(key: &str, value_name: Option<&str>) -> Result<String, RegistryAccessError> {
         let key_wide = wide(key);
         let mut raw_handle = ptr::null_mut();
         let open_status = unsafe {
@@ -1042,260 +1060,6 @@ fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ExplorerIntegrationStatus {
-    pub installed: bool,
-    pub healthy: bool,
-    pub matching_commands: usize,
-    pub message: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-struct ExplorerVerb {
-    key: &'static str,
-    label: &'static str,
-    action: ExplorerAction,
-}
-
-fn explorer_verbs() -> [ExplorerVerb; 5] {
-    [
-        ExplorerVerb {
-            key: r"Software\Classes\*\shell\OffloadKit.SetSource",
-            label: "Đặt làm Source trong OffloadKit",
-            action: ExplorerAction::SetSource,
-        },
-        ExplorerVerb {
-            key: r"Software\Classes\Directory\shell\OffloadKit.SetSource",
-            label: "Đặt làm Source trong OffloadKit",
-            action: ExplorerAction::SetSource,
-        },
-        ExplorerVerb {
-            key: r"Software\Classes\Directory\shell\OffloadKit.SetDestination",
-            label: "Đặt làm Destination trong OffloadKit",
-            action: ExplorerAction::SetDestination,
-        },
-        ExplorerVerb {
-            key: r"Software\Classes\Directory\Background\shell\OffloadKit.SetSource",
-            label: "Đặt folder hiện tại làm Source trong OffloadKit",
-            action: ExplorerAction::SetSource,
-        },
-        ExplorerVerb {
-            key: r"Software\Classes\Directory\Background\shell\OffloadKit.SetDestination",
-            label: "Đặt folder hiện tại làm Destination trong OffloadKit",
-            action: ExplorerAction::SetDestination,
-        },
-    ]
-}
-
-fn build_registry_command(
-    executable: &Path,
-    action: &ExplorerAction,
-) -> Result<String, ExplorerRequestError> {
-    let executable = executable
-        .to_str()
-        .ok_or_else(|| ExplorerRequestError::new("Executable path is not valid Unicode"))?;
-    let escaped = executable.replace('"', "\\\"");
-    let action = match action {
-        ExplorerAction::SetSource => "set-source",
-        ExplorerAction::SetDestination => "set-destination",
-    };
-    Ok(format!(
-        r#""{escaped}" --explorer-action {action} --path "%V""#
-    ))
-}
-
-trait RegistryStore {
-    fn set_string(&self, key: &str, name: Option<&str>, value: &str) -> Result<(), String>;
-    fn get_string(&self, key: &str, name: Option<&str>) -> Result<String, String>;
-    fn key_exists(&self, key: &str) -> Result<bool, String>;
-    fn delete_tree(&self, key: &str) -> Result<(), String>;
-}
-
-#[derive(Clone, Debug)]
-struct RegistryScope(String);
-impl RegistryScope {
-    fn new(prefix: impl Into<String>) -> Self {
-        Self(prefix.into())
-    }
-    fn qualify(&self, key: &str) -> String {
-        if self.0.is_empty() {
-            key.into()
-        } else {
-            format!(r"{}\{}", self.0, key)
-        }
-    }
-}
-
-fn integration_status_with_registry<R: RegistryStore>(
-    registry: &R,
-    scope: &RegistryScope,
-    executable: &Path,
-) -> Result<ExplorerIntegrationStatus, ExplorerRequestError> {
-    let mut matching = 0;
-    for verb in explorer_verbs() {
-        let key = scope.qualify(&verb.key);
-        let command = scope.qualify(&format!(r"{}\command", verb.key));
-        let expected = build_registry_command(executable, &verb.action)?;
-        if registry.get_string(&key, None).ok().as_deref() == Some(verb.label)
-            && registry.get_string(&key, Some("Icon")).ok().as_deref() == executable.to_str()
-            && registry.get_string(&command, None).ok().as_deref() == Some(expected.as_str())
-        {
-            matching += 1;
-        }
-    }
-    let healthy = matching == explorer_verbs().len();
-    Ok(ExplorerIntegrationStatus {
-        installed: healthy,
-        healthy,
-        matching_commands: matching,
-        message: (!healthy && matching > 0).then(|| {
-            "Explorer integration is partially installed or points to another executable".into()
-        }),
-    })
-}
-
-fn install_with_registry<R: RegistryStore>(
-    registry: &R,
-    scope: &RegistryScope,
-    executable: &Path,
-) -> Result<ExplorerIntegrationStatus, ExplorerRequestError> {
-    let mut created = Vec::new();
-    for verb in explorer_verbs() {
-        let key = scope.qualify(&verb.key);
-        if !registry
-            .key_exists(&key)
-            .map_err(ExplorerRequestError::new)?
-        {
-            created.push(key.clone());
-        }
-        let command = scope.qualify(&format!(r"{}\command", verb.key));
-        let write = registry
-            .set_string(&key, None, verb.label)
-            .and_then(|_| {
-                registry.set_string(
-                    &key,
-                    Some("Icon"),
-                    executable
-                        .to_str()
-                        .ok_or("Executable path is not valid Unicode")?,
-                )
-            })
-            .and_then(|_| registry.set_string(&key, Some("Position"), "Bottom"))
-            .and_then(|_| registry.set_string(&key, Some("MultiSelectModel"), "Single"))
-            .and_then(|_| {
-                registry.set_string(
-                    &command,
-                    None,
-                    &build_registry_command(executable, &verb.action).map_err(|e| e.to_string())?,
-                )
-            });
-        if let Err(error) = write {
-            for key in created.iter().rev() {
-                let _ = registry.delete_tree(key);
-            }
-            return Err(ExplorerRequestError::new(format!(
-                "Registry install failed and rolled back: {error}"
-            )));
-        }
-    }
-    let status = integration_status_with_registry(registry, scope, executable)?;
-    if !status.healthy {
-        return Err(ExplorerRequestError::new(
-            "Registry install read-back failed",
-        ));
-    }
-    Ok(status)
-}
-
-fn uninstall_with_registry<R: RegistryStore>(
-    registry: &R,
-    scope: &RegistryScope,
-    executable: &Path,
-) -> Result<ExplorerIntegrationStatus, ExplorerRequestError> {
-    for verb in explorer_verbs() {
-        registry
-            .delete_tree(&scope.qualify(&verb.key))
-            .map_err(ExplorerRequestError::new)?;
-    }
-    integration_status_with_registry(registry, scope, executable)
-}
-
-#[cfg(windows)]
-struct WindowsRegistry;
-#[cfg(windows)]
-impl RegistryStore for WindowsRegistry {
-    fn set_string(&self, key: &str, name: Option<&str>, value: &str) -> Result<(), String> {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        let root = RegKey::predef(HKEY_CURRENT_USER);
-        let (key, _) = root.create_subkey(key).map_err(|e| e.to_string())?;
-        key.set_value(name.unwrap_or(""), &value)
-            .map_err(|e| e.to_string())
-    }
-    fn get_string(&self, key: &str, name: Option<&str>) -> Result<String, String> {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        RegKey::predef(HKEY_CURRENT_USER)
-            .open_subkey(key)
-            .and_then(|key| key.get_value(name.unwrap_or("")))
-            .map_err(|e| e.to_string())
-    }
-    fn key_exists(&self, key: &str) -> Result<bool, String> {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        match RegKey::predef(HKEY_CURRENT_USER).open_subkey(key) {
-            Ok(_) => Ok(true),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-    fn delete_tree(&self, key: &str) -> Result<(), String> {
-        use winreg::{enums::HKEY_CURRENT_USER, RegKey};
-        match RegKey::predef(HKEY_CURRENT_USER).delete_subkey_all(key) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-}
-
-#[tauri::command]
-pub fn install_explorer_integration() -> Result<ExplorerIntegrationStatus, String> {
-    #[cfg(windows)]
-    {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        return install_with_registry(&WindowsRegistry, &RegistryScope::new(""), &exe)
-            .map_err(|e| e.to_string());
-    }
-    #[cfg(not(windows))]
-    Err("Windows Explorer integration is only available on Windows".into())
-}
-#[tauri::command]
-pub fn uninstall_explorer_integration() -> Result<ExplorerIntegrationStatus, String> {
-    #[cfg(windows)]
-    {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        return uninstall_with_registry(&WindowsRegistry, &RegistryScope::new(""), &exe)
-            .map_err(|e| e.to_string());
-    }
-    #[cfg(not(windows))]
-    Err("Windows Explorer integration is only available on Windows".into())
-}
-#[tauri::command]
-pub fn explorer_integration_status() -> Result<ExplorerIntegrationStatus, String> {
-    #[cfg(windows)]
-    {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        return integration_status_with_registry(&WindowsRegistry, &RegistryScope::new(""), &exe)
-            .map_err(|e| e.to_string());
-    }
-    #[cfg(not(windows))]
-    Ok(ExplorerIntegrationStatus {
-        installed: false,
-        healthy: false,
-        matching_commands: 0,
-        message: None,
-    })
-}
-
 #[cfg(test)]
 #[derive(Default)]
 struct MemoryRegistry {
@@ -1313,12 +1077,28 @@ impl MemoryRegistry {
     }
 }
 #[cfg(test)]
-impl RegistryStore for MemoryRegistry {
-    fn set_string(&self, key: &str, name: Option<&str>, value: &str) -> Result<(), String> {
+impl RegistryAccess for MemoryRegistry {
+    fn key_exists(&self, key: &str) -> Result<bool, RegistryAccessError> {
+        Ok(self
+            .values
+            .lock()
+            .unwrap()
+            .keys()
+            .any(|(candidate, _)| candidate == key || candidate.starts_with(&format!("{key}\\"))))
+    }
+    fn create_key(&self, _key: &str) -> Result<(), RegistryAccessError> {
+        Ok(())
+    }
+    fn set_string(
+        &self,
+        key: &str,
+        name: Option<&str>,
+        value: &str,
+    ) -> Result<(), RegistryAccessError> {
         let mut writes = self.writes.lock().unwrap();
         *writes += 1;
         if self.fail_on_write == Some(*writes) {
-            return Err("simulated failure".into());
+            return Err(RegistryAccessError::Other("simulated failure".into()));
         }
         self.values
             .lock()
@@ -1326,25 +1106,17 @@ impl RegistryStore for MemoryRegistry {
             .insert((key.into(), name.unwrap_or("").into()), value.into());
         Ok(())
     }
-    fn get_string(&self, key: &str, name: Option<&str>) -> Result<String, String> {
+    fn get_string(&self, key: &str, name: Option<&str>) -> Result<String, RegistryAccessError> {
         self.values
             .lock()
             .unwrap()
             .get(&(key.into(), name.unwrap_or("").into()))
             .cloned()
-            .ok_or_else(|| "not found".into())
+            .ok_or(RegistryAccessError::NotFound)
     }
-    fn key_exists(&self, key: &str) -> Result<bool, String> {
-        Ok(self
-            .values
-            .lock()
-            .unwrap()
-            .keys()
-            .any(|(candidate, _)| candidate == key || candidate.starts_with(&format!(r"{}\", key))))
-    }
-    fn delete_tree(&self, key: &str) -> Result<(), String> {
+    fn delete_tree(&self, key: &str) -> Result<(), RegistryAccessError> {
         self.values.lock().unwrap().retain(|(candidate, _), _| {
-            candidate != key && !candidate.starts_with(&format!(r"{}\", key))
+            candidate != key && !candidate.starts_with(&format!("{key}\\"))
         });
         Ok(())
     }
@@ -1358,20 +1130,19 @@ struct TestRegistryNamespace {
 #[cfg(all(test, windows))]
 impl TestRegistryNamespace {
     fn new() -> Self {
-        let scope = RegistryScope::new(format!(
-            r"Software\OffloadKit\Phase13ATest\{}",
-            uuid::Uuid::new_v4()
-        ));
         Self {
             registry: WindowsRegistry,
-            scope,
+            scope: RegistryScope::new(format!(
+                r"Software\OffloadKit\Phase13ATest\{}",
+                uuid::Uuid::new_v4()
+            )),
         }
     }
 }
 #[cfg(all(test, windows))]
 impl Drop for TestRegistryNamespace {
     fn drop(&mut self) {
-        let _ = self.registry.delete_tree(&self.scope.0);
+        let _ = RegistryAccess::delete_tree(&self.registry, &self.scope.base);
     }
 }
 
@@ -1381,10 +1152,8 @@ mod tests {
         build_registry_command, explorer_verbs, install_with_registry,
         integration_status_with_registry, parse_explorer_activation, parse_explorer_request,
         uninstall_with_registry, ExplorerAction, ExplorerActivation, ExplorerEvent,
-        ExplorerPendingState, MemoryRegistry, RegistryScope,
+        ExplorerPendingState, MemoryRegistry, RegistryAccess, RegistryScope, TestRegistryNamespace,
     };
-    #[cfg(windows)]
-    use super::{RegistryStore, TestRegistryNamespace};
     use std::ffi::OsString;
     use std::fs;
     use std::path::Path;
