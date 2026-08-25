@@ -53,10 +53,26 @@ fn should_cascade_continue(hop1_outcome: &CopyOutcome) -> bool {
 fn selection_for_relay(
     selection: Option<&SourceSelection>,
     primary: &std::path::Path,
+    hop1_outcome: &CopyOutcome,
 ) -> std::io::Result<Option<SourceSelection>> {
-    selection
-        .map(|selection| selection.rebase(primary.to_path_buf()))
-        .transpose()
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    let output_paths: Vec<PathBuf> = hop1_outcome
+        .mhl_entries
+        .iter()
+        .map(|entry| primary.join(&entry.relative_path))
+        .chain(
+            hop1_outcome
+                .skipped_files
+                .iter()
+                .map(|entry| primary.join(&entry.path)),
+        )
+        .collect();
+    if output_paths.is_empty() {
+        return selection.rebase(primary.to_path_buf()).map(Some);
+    }
+    SourceSelection::new(primary.to_path_buf(), output_paths).map(Some)
 }
 
 fn spawn_job<R: Runtime>(
@@ -275,6 +291,7 @@ pub fn start_transfer_group<R: Runtime>(
                 let relay_selection = match selection_for_relay(
                     source_selection_thread.as_ref(),
                     &primary_thread,
+                    &outcome,
                 ) {
                     Ok(selection) => selection,
                     Err(error) => {
@@ -385,22 +402,71 @@ mod tests {
         let selected_folder = source.path().join("CARD_A");
         fs::create_dir_all(&selected_folder).unwrap();
         fs::write(selected_folder.join("clip.mov"), b"footage").unwrap();
-        fs::create_dir_all(primary.path().join("CARD_A")).unwrap();
-        fs::write(primary.path().join("CARD_A").join("clip.mov"), b"footage").unwrap();
         let selection = SourceSelection::new(
             source.path().to_path_buf(),
             vec![selected_folder],
         )
         .unwrap();
 
-        let relay = selection_for_relay(Some(&selection), primary.path()).unwrap();
+        let outcome = crate::copy_engine::run_copy_core_with_selection(
+            &NoopSink,
+            "relay-layout".to_string(),
+            &selection,
+            primary.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &OrganizeSettings::default(),
+            false,
+            false,
+            None,
+        );
+        let relay =
+            selection_for_relay(Some(&selection), primary.path(), &outcome).unwrap();
 
         let relay = relay.expect("selected cascades must stay selected on hop 2");
         assert_eq!(relay.common_root(), primary.path());
         assert_eq!(
             relay.selected_paths(),
-            &[primary.path().join("CARD_A")]
+            &[primary.path().join("CARD_A").join("clip.mov")]
         );
+    }
+
+    #[test]
+    fn selected_cascade_relays_actual_flattened_output_paths() {
+        let source = tempfile::tempdir().unwrap();
+        let primary = tempfile::tempdir().unwrap();
+        let selected_folder = source.path().join("CARD_A");
+        fs::create_dir_all(selected_folder.join("DCIM")).unwrap();
+        fs::write(selected_folder.join("DCIM").join("clip.mov"), b"footage").unwrap();
+        let selection = SourceSelection::new(
+            source.path().to_path_buf(),
+            vec![selected_folder],
+        )
+        .unwrap();
+        let mut organize = OrganizeSettings::default();
+        organize.flatten = true;
+        let outcome = crate::copy_engine::run_copy_core_with_selection(
+            &NoopSink,
+            "flatten-hop1".to_string(),
+            &selection,
+            primary.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Source",
+            &organize,
+            false,
+            false,
+            None,
+        );
+
+        let relay =
+            selection_for_relay(Some(&selection), primary.path(), &outcome).unwrap();
+
+        let relay = relay.expect("selected cascade relay");
+        assert_eq!(relay.selected_paths(), &[primary.path().join("clip.mov")]);
     }
 
     fn test_outcome(cancelled: bool, files_copied: u64, failed_files: Vec<FailedFile>) -> CopyOutcome {
