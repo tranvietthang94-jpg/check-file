@@ -6,6 +6,7 @@ mod copy_engine;
 mod dedup;
 mod disks;
 mod eject;
+pub mod explorer_integration;
 mod media_scan;
 mod metadata;
 mod mhl;
