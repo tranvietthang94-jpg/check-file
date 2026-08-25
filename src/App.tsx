@@ -62,7 +62,7 @@ import "./App.css";
 
 function endpointLabel(endpoint: Endpoint, disks: DiskInfo[]) {
   const disk = disks.find((d) => d.id === endpoint.diskId);
-  return endpoint.label || disk?.name || endpoint.diskId;
+  return endpoint.label || (endpoint.id === endpoint.diskId ? disk?.name : undefined) || pathLabel(endpoint.path);
 }
 
 function wildcardMatches(value: string, pattern: string): boolean {

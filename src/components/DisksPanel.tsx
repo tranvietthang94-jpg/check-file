@@ -6,7 +6,7 @@ import { useTransfersStore } from "../state/transfersStore";
 import { useMhlVerifyStore } from "../state/mhlVerifyStore";
 import { useRecentsStore } from "../state/recentsStore";
 import { ejectDisk, renameDisk } from "../lib/tauri";
-import { formatBytes } from "../lib/format";
+import { formatBytes, pathLabel } from "../lib/format";
 import { DISK_DRAG_MIME, ENDPOINT_REMOVE_MIME } from "../lib/dragTypes";
 import { DriveIcon } from "./icons/DriveIcon";
 import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
@@ -236,8 +236,9 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
         icon: <ArrowRightLeft className={iconClass} />,
         disabled: cascadeFromCandidates.length === 0,
         children: cascadeFromCandidates.map((d) => ({
-          label: d.label || disks.find((disk2) => disk2.id === d.diskId)?.name || d.diskId,
-          onSelect: () => insertDestinationAfter(disk.id, d.diskId),
+          label:
+            d.label || disks.find((disk2) => disk2.id === d.diskId)?.name || pathLabel(d.path),
+          onSelect: () => insertDestinationAfter(disk.id, d.id),
         })),
       },
       {
@@ -313,11 +314,11 @@ export function DisksPanel({ onVerifyRequested }: DisksPanelProps) {
           e.dataTransfer.dropEffect = "move";
         }}
         onDrop={(e) => {
-          const diskId = e.dataTransfer.getData(ENDPOINT_REMOVE_MIME);
-          if (!diskId) return;
+          const endpointId = e.dataTransfer.getData(ENDPOINT_REMOVE_MIME);
+          if (!endpointId) return;
           e.preventDefault();
-          if (sources.some((s) => s.diskId === diskId)) removeSource(diskId);
-          if (destinations.some((d) => d.diskId === diskId)) removeDestination(diskId);
+          if (sources.some((s) => s.id === endpointId)) removeSource(endpointId);
+          if (destinations.some((d) => d.id === endpointId)) removeDestination(endpointId);
         }}
         className="grid grid-cols-3 content-start gap-x-4 gap-y-5 overflow-y-auto px-2 py-3"
       >

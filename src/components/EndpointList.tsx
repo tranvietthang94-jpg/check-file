@@ -9,7 +9,7 @@ import { DiskContextMenu, type DiskContextMenuItem } from "./DiskContextMenu";
 import { ArrowUpFromLine, ExternalLink, FolderInput, Inbox, Menu as MenuIcon, Plus, Tag, Trash2 } from "./icons";
 import { DISK_DRAG_MIME, ENDPOINT_REMOVE_MIME, ENDPOINT_REORDER_MIME } from "../lib/dragTypes";
 import { ejectDisk } from "../lib/tauri";
-import { formatBytes } from "../lib/format";
+import { formatBytes, pathLabel } from "../lib/format";
 import { cn } from "../lib/cn";
 import type { DiskInfo, Endpoint } from "../types/disk";
 
@@ -25,9 +25,9 @@ interface EndpointListProps {
   title: string;
   endpoints: Endpoint[];
   disks: DiskInfo[];
-  onRemove: (diskId: string) => void;
-  onLabelChange: (diskId: string, label: string) => void;
-  onPathChange: (diskId: string, path: string) => void;
+  onRemove: (endpointId: string) => void;
+  onLabelChange: (endpointId: string, label: string) => void;
+  onPathChange: (endpointId: string, path: string) => void;
   onBrowse?: (path: string) => void;
   /** "in use" (Sources) vs "free" (Destinations) -- matches which stat
    * OffShoot surfaces under the label on each side. */
@@ -55,10 +55,10 @@ export function EndpointList({
   onReorder,
 }: EndpointListProps) {
   const [dragOver, setDragOver] = useState(false);
-  const [reorderOver, setReorderOver] = useState<{ diskId: string; placement: "before" | "after" } | null>(null);
+  const [reorderOver, setReorderOver] = useState<{ endpointId: string; placement: "before" | "after" } | null>(null);
   const [ejecting, setEjecting] = useState<Record<string, boolean>>({});
   const [ejectError, setEjectError] = useState<Record<string, string>>({});
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; diskId: string } | null>(
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; endpointId: string } | null>(
     null,
   );
   const [editingLabelDiskId, setEditingLabelDiskId] = useState<string | null>(null);
@@ -77,7 +77,7 @@ export function EndpointList({
   }
 
   function startEditingLabel(endpoint: Endpoint) {
-    setEditingLabelDiskId(endpoint.diskId);
+    setEditingLabelDiskId(endpoint.id);
     setLabelDraft(endpoint.label);
   }
 
@@ -121,7 +121,7 @@ export function EndpointList({
       {
         label: "Đường dẫn thư mục…",
         icon: <FolderInput className={iconClass} />,
-        onSelect: () => chooseFolderPath(endpoint.diskId, disk?.mountPoint),
+        onSelect: () => chooseFolderPath(endpoint.id, disk?.mountPoint),
       },
     ];
     if (onBrowse) {
@@ -135,13 +135,13 @@ export function EndpointList({
       label: "Xóa",
       icon: <Trash2 className={iconClass} />,
       danger: true,
-      onSelect: () => onRemove(endpoint.diskId),
+      onSelect: () => onRemove(endpoint.id),
     });
     return items;
   }
 
   const contextMenuEndpoint = contextMenu
-    ? endpoints.find((e) => e.diskId === contextMenu.diskId)
+    ? endpoints.find((e) => e.id === contextMenu.endpointId)
     : undefined;
 
   return (
@@ -186,15 +186,17 @@ export function EndpointList({
       <ul className="flex flex-col gap-2">
         {endpoints.map((endpoint, index) => {
           const disk = disks.find((d) => d.id === endpoint.diskId);
+          const displayName =
+            endpoint.label || (endpoint.id === endpoint.diskId ? disk?.name : undefined) || pathLabel(endpoint.path);
           return (
             <li
-              key={endpoint.diskId}
+              key={endpoint.id}
               data-testid={title === "Nguồn" ? "source-endpoint-card" : "destination-endpoint-card"}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.setData(ENDPOINT_REMOVE_MIME, endpoint.diskId);
+                e.dataTransfer.setData(ENDPOINT_REMOVE_MIME, endpoint.id);
                 e.dataTransfer.effectAllowed = "move";
-                if (onReorder) e.dataTransfer.setData(ENDPOINT_REORDER_MIME, endpoint.diskId);
+                if (onReorder) e.dataTransfer.setData(ENDPOINT_REORDER_MIME, endpoint.id);
               }}
               onDragOver={(e) => {
                 if (!onReorder) return;
@@ -202,34 +204,34 @@ export function EndpointList({
                 e.stopPropagation();
                 const rect = e.currentTarget.getBoundingClientRect();
                 const placement = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
-                setReorderOver({ diskId: endpoint.diskId, placement });
+                setReorderOver({ endpointId: endpoint.id, placement });
               }}
-              onDragLeave={() => setReorderOver((cur) => (cur?.diskId === endpoint.diskId ? null : cur))}
+              onDragLeave={() => setReorderOver((cur) => (cur?.endpointId === endpoint.id ? null : cur))}
               onDrop={(e) => {
                 if (!onReorder) return;
                 const fromDiskId = e.dataTransfer.getData(ENDPOINT_REORDER_MIME);
                 if (!fromDiskId) return;
                 e.preventDefault();
                 e.stopPropagation();
-                const placement = reorderOver?.diskId === endpoint.diskId ? reorderOver.placement : "before";
+                const placement = reorderOver?.endpointId === endpoint.id ? reorderOver.placement : "before";
                 setReorderOver(null);
-                onReorder(fromDiskId, endpoint.diskId, placement);
+                onReorder(fromDiskId, endpoint.id, placement);
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, diskId: endpoint.diskId });
+                setContextMenu({ x: e.clientX, y: e.clientY, endpointId: endpoint.id });
               }}
               title="Kéo để sắp thứ tự (Nối tiếp), hoặc chuột phải để xem thêm thao tác"
               className={`group relative flex items-center gap-2 rounded border px-3 py-2 ${
-                reorderOver?.diskId === endpoint.diskId
+                reorderOver?.endpointId === endpoint.id
                   ? "border-neutral-800 bg-neutral-900"
                   : "border-neutral-800 bg-neutral-900"
               } ${onReorder ? "cursor-grab active:cursor-grabbing" : ""}`}
             >
-              {reorderOver?.diskId === endpoint.diskId && reorderOver.placement === "before" && (
+              {reorderOver?.endpointId === endpoint.id && reorderOver.placement === "before" && (
                 <span data-testid="destination-insertion-before" className="absolute -top-1 left-1 right-1 h-0.5 bg-blue-500" />
               )}
-              {reorderOver?.diskId === endpoint.diskId && reorderOver.placement === "after" && (
+              {reorderOver?.endpointId === endpoint.id && reorderOver.placement === "after" && (
                 <span data-testid="destination-insertion-after" className="absolute -bottom-1 left-1 right-1 h-0.5 bg-blue-500" />
               )}
               {onReorder && (
@@ -252,14 +254,14 @@ export function EndpointList({
                 )}
               </div>
               <div className="flex min-w-0 flex-1 flex-col">
-                {editingLabelDiskId === endpoint.diskId ? (
+                {editingLabelDiskId === endpoint.id ? (
                   <input
                     autoFocus
                     value={labelDraft}
                     onChange={(e) => setLabelDraft(e.currentTarget.value)}
-                    onBlur={() => commitLabelEdit(endpoint.diskId)}
+                    onBlur={() => commitLabelEdit(endpoint.id)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") commitLabelEdit(endpoint.diskId);
+                      if (e.key === "Enter") commitLabelEdit(endpoint.id);
                       if (e.key === "Escape") setEditingLabelDiskId(null);
                     }}
                     placeholder="Nhãn…"
@@ -282,12 +284,12 @@ export function EndpointList({
                         {endpoint.label}
                       </span>
                     ) : (
-                      (disk?.name ?? endpoint.diskId)
+                      displayName
                     )}
                   </button>
                 )}
                 <span className="truncate text-xs text-neutral-500">
-                  {disk?.mountPoint ?? "(đã rút)"}
+                  {endpoint.path}
                   {disk &&
                     ` · ${
                       usageKind === "used"
@@ -295,18 +297,18 @@ export function EndpointList({
                         : `${formatBytes(disk.availableBytes)} còn trống`
                     }`}
                 </span>
-                {ejectError[endpoint.diskId] && (
+                {endpoint.diskId && ejectError[endpoint.diskId] && (
                   <p className="text-[10px] text-red-400">{ejectError[endpoint.diskId]}</p>
                 )}
               </div>
               <IconButton
-                aria-label={`Thêm thao tác cho ${endpoint.label || disk?.name || endpoint.diskId}`}
+                aria-label={`Thêm thao tác cho ${displayName}`}
                 title="Thêm thao tác"
                 icon={<MenuIcon className="h-3.5 w-3.5" />}
                 className="opacity-0 group-hover:opacity-100"
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  setContextMenu({ x: rect.right - 200, y: rect.bottom + 4, diskId: endpoint.diskId });
+                  setContextMenu({ x: rect.right - 200, y: rect.bottom + 4, endpointId: endpoint.id });
                 }}
               />
             </li>
@@ -320,7 +322,7 @@ export function EndpointList({
           y={contextMenu.y}
           items={buildMenuItems(
             contextMenuEndpoint,
-            disks.find((d) => d.id === contextMenu.diskId),
+            disks.find((d) => d.id === contextMenuEndpoint.diskId),
           )}
           onClose={() => setContextMenu(null)}
         />

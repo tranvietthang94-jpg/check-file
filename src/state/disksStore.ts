@@ -1,7 +1,47 @@
 import { create } from "zustand";
 import { effectiveJobDate, renderTemplate } from "../lib/tokenEngine";
 import { useOrganizeStore } from "./organizeStore";
-import type { DiskInfo, Endpoint } from "../types/disk";
+import { pathLabel } from "../lib/format";
+import type { AddEndpointPathResult, DiskInfo, Endpoint } from "../types/disk";
+
+export function normalizeWindowsPath(path: string): string {
+  const normalized = path.replace(/\//g, "\\");
+  if (/^[a-zA-Z]:\\+$/.test(normalized)) {
+    return `${normalized.slice(0, 2).toLowerCase()}\\`;
+  }
+  if (/^\\\\[^\\]+\\[^\\]+\\*$/.test(normalized)) {
+    return `${normalized.replace(/\\+$/, "").toLowerCase()}\\`;
+  }
+  return normalized.replace(/\\+$/, "").toLowerCase();
+}
+
+function diskForPath(path: string, disks: DiskInfo[]): DiskInfo | undefined {
+  const pathKey = normalizeWindowsPath(path);
+  return [...disks]
+    .sort(
+      (left, right) =>
+        normalizeWindowsPath(right.mountPoint).length -
+        normalizeWindowsPath(left.mountPoint).length,
+    )
+    .find((disk) => {
+      const mountKey = normalizeWindowsPath(disk.mountPoint);
+      return (
+        pathKey === mountKey ||
+        pathKey.startsWith(mountKey.endsWith("\\") ? mountKey : `${mountKey}\\`)
+      );
+    });
+}
+
+function pathEndpoint(path: string, disks: DiskInfo[], isAutoLabel: boolean): Endpoint {
+  const disk = diskForPath(path, disks);
+  return {
+    id: `path:${normalizeWindowsPath(path)}`,
+    diskId: disk?.id ?? null,
+    label: "",
+    path,
+    isAutoLabel,
+  };
+}
 
 interface DisksState {
   disks: DiskInfo[];
@@ -17,15 +57,17 @@ interface DisksState {
   setEndpoints: (sources: Endpoint[], destinations: Endpoint[]) => void;
   addSource: (diskId: string) => void;
   addDestination: (diskId: string) => void;
-  removeSource: (diskId: string) => void;
-  removeDestination: (diskId: string) => void;
+  addSourcePath: (path: string) => AddEndpointPathResult;
+  addDestinationPath: (path: string) => AddEndpointPathResult;
+  removeSource: (endpointId: string) => void;
+  removeDestination: (endpointId: string) => void;
   /** The AddTransfersBar's "clear" (✕) button -- resets both lists so the
    * next Source/Destination pick starts from a clean slate. */
   clearSourcesAndDestinations: () => void;
-  setSourceLabel: (diskId: string, label: string) => void;
-  setDestinationLabel: (diskId: string, label: string) => void;
-  setSourcePath: (diskId: string, path: string) => void;
-  setDestinationPath: (diskId: string, path: string) => void;
+  setSourceLabel: (endpointId: string, label: string) => void;
+  setDestinationLabel: (endpointId: string, label: string) => void;
+  setSourcePath: (endpointId: string, path: string) => void;
+  setDestinationPath: (endpointId: string, path: string) => void;
   /** Re-renders every still-auto-labeled source's `{Counter}` in sequence, so
    * removing or manually overriding one never leaves a gap or a duplicate --
    * mirrors OffShoot's "recalculates remaining auto-labels" behavior. */
@@ -34,7 +76,7 @@ interface DisksState {
    * the Cascade hop order now that "Add N Transfers" builds a cascade chain
    * straight from the live Destinations list instead of a per-click
    * composer form. */
-  reorderDestinations: (fromDiskId: string, toDiskId: string, placement?: "before" | "after") => void;
+  reorderDestinations: (fromEndpointId: string, toEndpointId: string, placement?: "before" | "after") => void;
   /** The disk context menu's "Cascade from ▶ [existing destination]" --
    * adds `diskId` as a Destination (if it isn't already one) positioned
    * right after `afterDiskId` in the list, i.e. it now receives from that
@@ -73,7 +115,7 @@ export const useDisksStore = create<DisksState>((set, get) => ({
       return {
         sources: [
           ...state.sources,
-          { diskId, label: "", path: disk?.mountPoint ?? "", isAutoLabel },
+          { id: diskId, diskId, label: "", path: disk?.mountPoint ?? "", isAutoLabel },
         ],
       };
     });
@@ -88,65 +130,94 @@ export const useDisksStore = create<DisksState>((set, get) => ({
       return {
         destinations: [
           ...state.destinations,
-          { diskId, label: "", path: disk?.mountPoint ?? "", isAutoLabel: false },
+          { id: diskId, diskId, label: "", path: disk?.mountPoint ?? "", isAutoLabel: false },
         ],
       };
     });
   },
 
-  removeSource: (diskId) => {
+  addSourcePath: (path) => {
+    if (path.trim() === "") {
+      return { ok: false, added: false, error: "Đường dẫn Source không được để trống." };
+    }
+    const pathKey = normalizeWindowsPath(path);
+    const existing = get().sources.find((source) => normalizeWindowsPath(source.path) === pathKey);
+    if (existing) return { ok: true, added: false, endpoint: existing };
+
+    const endpoint = pathEndpoint(path, get().disks, useOrganizeStore.getState().autoLabel.enabled);
+    set((state) => ({ sources: [...state.sources, endpoint] }));
+    get().recomputeAutoLabels();
+    return { ok: true, added: true, endpoint };
+  },
+
+  addDestinationPath: (path) => {
+    if (path.trim() === "") {
+      return { ok: false, added: false, error: "Đường dẫn Destination không được để trống." };
+    }
+    const pathKey = normalizeWindowsPath(path);
+    const existing = get().destinations.find(
+      (destination) => normalizeWindowsPath(destination.path) === pathKey,
+    );
+    if (existing) return { ok: true, added: false, endpoint: existing };
+
+    const endpoint = pathEndpoint(path, get().disks, false);
+    set((state) => ({ destinations: [...state.destinations, endpoint] }));
+    return { ok: true, added: true, endpoint };
+  },
+
+  removeSource: (endpointId) => {
     set((state) => ({
-      sources: state.sources.filter((s) => s.diskId !== diskId),
+      sources: state.sources.filter((s) => s.id !== endpointId),
     }));
     get().recomputeAutoLabels();
   },
 
-  removeDestination: (diskId) =>
+  removeDestination: (endpointId) =>
     set((state) => ({
-      destinations: state.destinations.filter((d) => d.diskId !== diskId),
+      destinations: state.destinations.filter((d) => d.id !== endpointId),
     })),
 
   clearSourcesAndDestinations: () => set({ sources: [], destinations: [] }),
 
-  setSourceLabel: (diskId, label) => {
+  setSourceLabel: (endpointId, label) => {
     // Typing into the label field is always a manual override, even if this
     // source's label happened to be auto-generated a moment ago.
     set((state) => ({
       sources: state.sources.map((s) =>
-        s.diskId === diskId ? { ...s, label, isAutoLabel: false } : s,
+        s.id === endpointId ? { ...s, label, isAutoLabel: false } : s,
       ),
     }));
     get().recomputeAutoLabels();
   },
 
-  setDestinationLabel: (diskId, label) =>
+  setDestinationLabel: (endpointId, label) =>
     set((state) => ({
       destinations: state.destinations.map((d) =>
-        d.diskId === diskId ? { ...d, label } : d,
+        d.id === endpointId ? { ...d, label } : d,
       ),
     })),
 
-  setSourcePath: (diskId, path) =>
+  setSourcePath: (endpointId, path) =>
     set((state) => ({
-      sources: state.sources.map((s) => (s.diskId === diskId ? { ...s, path } : s)),
+      sources: state.sources.map((s) => (s.id === endpointId ? { ...s, path } : s)),
     })),
 
-  setDestinationPath: (diskId, path) =>
+  setDestinationPath: (endpointId, path) =>
     set((state) => ({
       destinations: state.destinations.map((d) =>
-        d.diskId === diskId ? { ...d, path } : d,
+        d.id === endpointId ? { ...d, path } : d,
       ),
     })),
 
-  reorderDestinations: (fromDiskId, toDiskId, placement = "before") =>
+  reorderDestinations: (fromEndpointId, toEndpointId, placement = "before") =>
     set((state) => {
-      if (fromDiskId === toDiskId) return state;
-      const fromIndex = state.destinations.findIndex((d) => d.diskId === fromDiskId);
-      const targetIndex = state.destinations.findIndex((d) => d.diskId === toDiskId);
+      if (fromEndpointId === toEndpointId) return state;
+      const fromIndex = state.destinations.findIndex((d) => d.id === fromEndpointId);
+      const targetIndex = state.destinations.findIndex((d) => d.id === toEndpointId);
       if (fromIndex === -1 || targetIndex === -1) return state;
       const next = [...state.destinations];
       const [moved] = next.splice(fromIndex, 1);
-      const adjustedTargetIndex = next.findIndex((d) => d.diskId === toDiskId);
+      const adjustedTargetIndex = next.findIndex((d) => d.id === toEndpointId);
       next.splice(adjustedTargetIndex + (placement === "after" ? 1 : 0), 0, moved);
       return { destinations: next };
     }),
@@ -156,13 +227,14 @@ export const useDisksStore = create<DisksState>((set, get) => ({
       const disk = get().disks.find((d) => d.id === diskId);
       const existing = state.destinations.find((d) => d.diskId === diskId);
       const entry: Endpoint = existing ?? {
+        id: diskId,
         diskId,
         label: "",
         path: disk?.mountPoint ?? "",
         isAutoLabel: false,
       };
-      const withoutMoved = state.destinations.filter((d) => d.diskId !== diskId);
-      const afterIndex = withoutMoved.findIndex((d) => d.diskId === afterDiskId);
+      const withoutMoved = state.destinations.filter((d) => d.id !== entry.id);
+      const afterIndex = withoutMoved.findIndex((d) => d.id === afterDiskId);
       const next = [...withoutMoved];
       next.splice(afterIndex === -1 ? next.length : afterIndex + 1, 0, entry);
       return { destinations: next };
@@ -179,7 +251,7 @@ export const useDisksStore = create<DisksState>((set, get) => ({
         if (!s.isAutoLabel) return s;
         const disk = state.disks.find((d) => d.id === s.diskId);
         const label = renderTemplate(autoLabel.template, {
-          sourceName: disk?.name ?? s.diskId,
+          sourceName: disk?.name ?? pathLabel(s.path),
           counter,
           counterPadding: autoLabel.counterPadding,
           fileStem: "",

@@ -15,7 +15,7 @@ export const referenceDisks: DiskInfo[] = [
 
 export const referenceSources: Endpoint[] = [];
 export const referenceDestinations: Endpoint[] = [
-  { diskId: "E:", label: "", path: "E:\\", isAutoLabel: false },
+  { id: "E:", diskId: "E:", label: "", path: "E:\\", isAutoLabel: false },
 ];
 
 function job(id: string, status: TransferJob["status"], overrides: Partial<TransferJob> = {}): TransferJob {
