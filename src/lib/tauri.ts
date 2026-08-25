@@ -32,6 +32,26 @@ export interface ExplorerErrorPayload {
   message: string;
 }
 
+export interface ExplorerIntegrationStatus {
+  installed: boolean;
+  healthy: boolean;
+  matchingCommands: number;
+  message: string | null;
+}
+
+export function explorerIntegrationStatus(): Promise<ExplorerIntegrationStatus> {
+  if (!hasTauriRuntime()) return Promise.resolve({ installed: false, healthy: false, matchingCommands: 0, message: null });
+  return invoke<ExplorerIntegrationStatus>("explorer_integration_status");
+}
+
+export function installExplorerIntegration(): Promise<ExplorerIntegrationStatus> {
+  return invoke<ExplorerIntegrationStatus>("install_explorer_integration");
+}
+
+export function uninstallExplorerIntegration(): Promise<ExplorerIntegrationStatus> {
+  return invoke<ExplorerIntegrationStatus>("uninstall_explorer_integration");
+}
+
 function hasTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
