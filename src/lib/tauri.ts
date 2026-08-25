@@ -59,6 +59,19 @@ export interface FinderIntegrationStatus {
   message: string | null;
 }
 
+interface FinderIntegrationTestHook {
+  status: () => Promise<FinderIntegrationStatus>;
+  install: () => Promise<FinderIntegrationStatus>;
+  uninstall: () => Promise<FinderIntegrationStatus>;
+}
+
+function finderIntegrationTestHook(): FinderIntegrationTestHook | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as Window & {
+    __OFFLOADKIT_TEST_FINDER_INTEGRATION__?: FinderIntegrationTestHook;
+  }).__OFFLOADKIT_TEST_FINDER_INTEGRATION__;
+}
+
 export function explorerIntegrationStatus(): Promise<ExplorerIntegrationStatus> {
   if (!hasTauriRuntime()) return Promise.resolve({ installed: false, healthy: false, matchingCommands: 0, message: null });
   return invoke<ExplorerIntegrationStatus>("explorer_integration_status");
@@ -74,6 +87,8 @@ export function uninstallExplorerIntegration(): Promise<ExplorerIntegrationStatu
 
 export function finderIntegrationStatus(): Promise<FinderIntegrationStatus> {
   if (!hasTauriRuntime()) {
+    const hook = finderIntegrationTestHook();
+    if (hook) return hook.status();
     return Promise.resolve({
       supported: false,
       installed: false,
@@ -91,10 +106,18 @@ export function finderIntegrationStatus(): Promise<FinderIntegrationStatus> {
 }
 
 export function installFinderIntegration(): Promise<FinderIntegrationStatus> {
+  if (!hasTauriRuntime()) {
+    const hook = finderIntegrationTestHook();
+    if (hook) return hook.install();
+  }
   return invoke<FinderIntegrationStatus>("install_finder_integration");
 }
 
 export function uninstallFinderIntegration(): Promise<FinderIntegrationStatus> {
+  if (!hasTauriRuntime()) {
+    const hook = finderIntegrationTestHook();
+    if (hook) return hook.uninstall();
+  }
   return invoke<FinderIntegrationStatus>("uninstall_finder_integration");
 }
 

@@ -7,8 +7,11 @@ import { Button } from "../ui/Button";
 import type { DateOverrideMode } from "../../types/organize";
 import {
   explorerIntegrationStatus,
+  finderIntegrationStatus,
   installExplorerIntegration,
+  installFinderIntegration,
   uninstallExplorerIntegration,
+  uninstallFinderIntegration,
 } from "../../lib/tauri";
 
 export function GeneralPreferences() {
@@ -21,9 +24,14 @@ export function GeneralPreferences() {
   const setManualDate = useOrganizeStore((s) => s.setManualDate);
   const setRolloverAt4am = useOrganizeStore((s) => s.setRolloverAt4am);
   const isWindows = navigator.userAgent.includes("Windows");
+  const isMacOS = navigator.userAgent.includes("Macintosh") || navigator.userAgent.includes("Mac OS X");
   const [explorerEnabled, setExplorerEnabled] = useState(false);
   const [explorerLoading, setExplorerLoading] = useState(false);
   const [explorerError, setExplorerError] = useState<string | null>(null);
+  const [finderEnabled, setFinderEnabled] = useState(false);
+  const [finderLoading, setFinderLoading] = useState(isMacOS);
+  const [finderError, setFinderError] = useState<string | null>(null);
+  const [finderSuccess, setFinderSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isWindows) return;
@@ -31,6 +39,36 @@ export function GeneralPreferences() {
       .then((status) => setExplorerEnabled(status.healthy))
       .catch((error) => setExplorerError(String(error)));
   }, [isWindows]);
+
+  useEffect(() => {
+    if (!isMacOS) return;
+    let active = true;
+    setFinderLoading(true);
+    finderIntegrationStatus()
+      .then((status) => {
+        if (!active) return;
+        setFinderEnabled(status.healthy);
+        if (status.misplacedApp) {
+          setFinderError(
+            status.message ??
+              "Hãy kéo OffloadKit.app vào /Applications trước khi bật Finder Quick Actions.",
+          );
+        } else if (status.installed && !status.healthy) {
+          setFinderError(
+            status.message ?? "Finder Quick Actions đang thiếu hoặc không khớp và cần cài lại.",
+          );
+        }
+      })
+      .catch((error) => {
+        if (active) setFinderError(String(error));
+      })
+      .finally(() => {
+        if (active) setFinderLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isMacOS]);
 
   async function toggleExplorer(enabled: boolean) {
     setExplorerLoading(true);
@@ -48,6 +86,40 @@ export function GeneralPreferences() {
       setExplorerError(String(error));
     } finally {
       setExplorerLoading(false);
+    }
+  }
+
+  async function toggleFinder(enabled: boolean) {
+    const previousEnabled = finderEnabled;
+    setFinderEnabled(enabled);
+    setFinderLoading(true);
+    setFinderError(null);
+    setFinderSuccess(null);
+    try {
+      const changed = enabled
+        ? await installFinderIntegration()
+        : await uninstallFinderIntegration();
+      const readBack = await finderIntegrationStatus();
+      if (enabled) {
+        if (!changed.healthy || !readBack.healthy) {
+          throw new Error(
+            readBack.message ?? "Không thể xác nhận đủ bốn Finder Quick Actions.",
+          );
+        }
+      } else if (readBack.installed) {
+        throw new Error(
+          readBack.message ?? "Không thể xác nhận Finder Quick Actions đã được gỡ.",
+        );
+      }
+      setFinderEnabled(enabled);
+      setFinderSuccess(
+        enabled ? "Đã bật Finder Quick Actions." : "Đã tắt Finder Quick Actions.",
+      );
+    } catch (error) {
+      setFinderEnabled(previousEnabled);
+      setFinderError(String(error));
+    } finally {
+      setFinderLoading(false);
     }
   }
 
@@ -69,6 +141,21 @@ export function GeneralPreferences() {
             onChange={(e) => void toggleExplorer(e.currentTarget.checked)}
           />
           {explorerError && <p role="alert" className="text-xs text-red-400">{explorerError}</p>}
+        </section>
+      )}
+
+      {isMacOS && (
+        <section className="flex flex-col gap-2">
+          <SectionHeading as="h3">macOS Finder Integration</SectionHeading>
+          <Checkbox
+            label="Bật Finder Quick Actions"
+            checked={finderEnabled}
+            disabled={finderLoading}
+            onChange={(e) => void toggleFinder(e.currentTarget.checked)}
+          />
+          {finderLoading && <p role="status" className="text-xs text-neutral-400">Đang cập nhật Finder Quick Actions…</p>}
+          {finderSuccess && !finderLoading && <p role="status" className="text-xs text-emerald-400">{finderSuccess}</p>}
+          {finderError && <p role="alert" className="text-xs text-red-400">{finderError}</p>}
         </section>
       )}
 
