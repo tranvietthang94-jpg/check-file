@@ -74,7 +74,10 @@ pub fn run() {
             explorer_integration::acknowledge_explorer_request,
             explorer_integration::install_explorer_integration,
             explorer_integration::uninstall_explorer_integration,
-            explorer_integration::explorer_integration_status
+            explorer_integration::explorer_integration_status,
+            finder_integration::install_finder_integration,
+            finder_integration::uninstall_finder_integration,
+            finder_integration::finder_integration_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

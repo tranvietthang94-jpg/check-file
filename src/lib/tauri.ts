@@ -46,6 +46,19 @@ export interface ExplorerIntegrationStatus {
   message: string | null;
 }
 
+export interface FinderIntegrationStatus {
+  supported: boolean;
+  installed: boolean;
+  healthy: boolean;
+  misplacedApp: boolean;
+  executablePath: string;
+  expectedWorkflows: number;
+  installedWorkflows: number;
+  matchingWorkflows: number;
+  problems: string[];
+  message: string | null;
+}
+
 export function explorerIntegrationStatus(): Promise<ExplorerIntegrationStatus> {
   if (!hasTauriRuntime()) return Promise.resolve({ installed: false, healthy: false, matchingCommands: 0, message: null });
   return invoke<ExplorerIntegrationStatus>("explorer_integration_status");
@@ -57,6 +70,32 @@ export function installExplorerIntegration(): Promise<ExplorerIntegrationStatus>
 
 export function uninstallExplorerIntegration(): Promise<ExplorerIntegrationStatus> {
   return invoke<ExplorerIntegrationStatus>("uninstall_explorer_integration");
+}
+
+export function finderIntegrationStatus(): Promise<FinderIntegrationStatus> {
+  if (!hasTauriRuntime()) {
+    return Promise.resolve({
+      supported: false,
+      installed: false,
+      healthy: false,
+      misplacedApp: false,
+      executablePath: "",
+      expectedWorkflows: 0,
+      installedWorkflows: 0,
+      matchingWorkflows: 0,
+      problems: [],
+      message: null,
+    });
+  }
+  return invoke<FinderIntegrationStatus>("finder_integration_status");
+}
+
+export function installFinderIntegration(): Promise<FinderIntegrationStatus> {
+  return invoke<FinderIntegrationStatus>("install_finder_integration");
+}
+
+export function uninstallFinderIntegration(): Promise<FinderIntegrationStatus> {
+  return invoke<FinderIntegrationStatus>("uninstall_finder_integration");
 }
 
 function hasTauriRuntime(): boolean {

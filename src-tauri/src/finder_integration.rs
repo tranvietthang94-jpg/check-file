@@ -1,5 +1,7 @@
 use crate::explorer_integration::ExplorerAction;
-use std::io;
+use serde::Serialize;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 pub const PRODUCTION_EXECUTABLE_PATH: &str =
@@ -12,6 +14,583 @@ pub struct RenderedWorkflow {
     pub executable_path: PathBuf,
     pub info_plist: String,
     pub document_wflow: String,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FinderIntegrationStatus {
+    pub supported: bool,
+    pub installed: bool,
+    pub healthy: bool,
+    pub misplaced_app: bool,
+    pub executable_path: String,
+    pub expected_workflows: usize,
+    pub installed_workflows: usize,
+    pub matching_workflows: usize,
+    pub problems: Vec<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FinderIntegrationError {
+    pub code: String,
+    pub message: String,
+}
+
+impl FinderIntegrationError {
+    fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+}
+
+pub fn status_at(
+    services_root: &Path,
+    executable: &Path,
+    require_production_executable: bool,
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    let executable_text = executable.to_str().ok_or_else(|| {
+        FinderIntegrationError::new(
+            "invalidExecutablePath",
+            "OffloadKit executable path is not valid Unicode",
+        )
+    })?;
+    let workflows = render_workflows(executable).map_err(|error| {
+        FinderIntegrationError::new(
+            "workflowRenderFailed",
+            format!("Cannot render Finder Quick Actions: {error}"),
+        )
+    })?;
+    let misplaced_app =
+        require_production_executable && executable != Path::new(PRODUCTION_EXECUTABLE_PATH);
+    let mut problems = Vec::new();
+    if misplaced_app {
+        problems.push(format!(
+            "OffloadKit must run from {PRODUCTION_EXECUTABLE_PATH}"
+        ));
+    }
+
+    let mut installed_workflows = 0;
+    let mut matching_workflows = 0;
+    match fs::symlink_metadata(services_root) {
+        Ok(metadata) if metadata.file_type().is_symlink() => problems.push(format!(
+            "Finder Services directory must not be a filesystem link: {}",
+            services_root.display()
+        )),
+        Ok(metadata) if !metadata.is_dir() => problems.push(format!(
+            "Finder Services path is not a directory: {}",
+            services_root.display()
+        )),
+        Ok(_) => {
+            for workflow in &workflows {
+                let bundle = services_root.join(workflow.bundle_name);
+                if fs::symlink_metadata(&bundle).is_ok() {
+                    installed_workflows += 1;
+                }
+                match workflow_matches(&bundle, workflow) {
+                    Ok(true) => matching_workflows += 1,
+                    Ok(false) => problems.push(format!(
+                        "Finder workflow is missing or does not match: {}",
+                        workflow.bundle_name
+                    )),
+                    Err(error) => problems.push(format!(
+                        "Cannot inspect Finder workflow {}: {error}",
+                        workflow.bundle_name
+                    )),
+                }
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            for workflow in &workflows {
+                problems.push(format!(
+                    "Finder workflow is missing: {}",
+                    workflow.bundle_name
+                ));
+            }
+        }
+        Err(error) => {
+            return Err(FinderIntegrationError::new(
+                "servicesReadFailed",
+                format!(
+                    "Cannot inspect Finder Services directory {}: {error}",
+                    services_root.display()
+                ),
+            ));
+        }
+    }
+
+    let healthy = !misplaced_app && matching_workflows == workflows.len();
+    let message = (!problems.is_empty()).then(|| problems.join("; "));
+    Ok(FinderIntegrationStatus {
+        supported: true,
+        installed: installed_workflows > 0,
+        healthy,
+        misplaced_app,
+        executable_path: executable_text.to_owned(),
+        expected_workflows: workflows.len(),
+        installed_workflows,
+        matching_workflows,
+        problems,
+        message,
+    })
+}
+
+pub fn install_at(
+    services_root: &Path,
+    executable: &Path,
+    require_production_executable: bool,
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    install_at_inner(
+        services_root,
+        executable,
+        require_production_executable,
+        None,
+    )
+}
+
+pub fn uninstall_at(
+    services_root: &Path,
+    executable: &Path,
+    require_production_executable: bool,
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    for workflow in render_workflows(executable).map_err(|error| {
+        FinderIntegrationError::new(
+            "workflowRenderFailed",
+            format!("Cannot render Finder Quick Actions: {error}"),
+        )
+    })? {
+        let bundle = services_root.join(workflow.bundle_name);
+        if fs::symlink_metadata(&bundle).is_ok() {
+            remove_path(&bundle).map_err(|error| {
+                FinderIntegrationError::new(
+                    "workflowUninstallFailed",
+                    format!("Cannot remove {}: {error}", bundle.display()),
+                )
+            })?;
+        }
+    }
+    status_at(services_root, executable, require_production_executable)
+}
+
+#[cfg(test)]
+fn install_at_with_failure(
+    services_root: &Path,
+    executable: &Path,
+    require_production_executable: bool,
+    fail_after: usize,
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    install_at_inner(
+        services_root,
+        executable,
+        require_production_executable,
+        Some(fail_after),
+    )
+}
+
+fn install_at_inner(
+    services_root: &Path,
+    executable: &Path,
+    require_production_executable: bool,
+    fail_after: Option<usize>,
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    if require_production_executable && executable != Path::new(PRODUCTION_EXECUTABLE_PATH) {
+        return Err(FinderIntegrationError::new(
+            "misplacedApplication",
+            format!(
+                "Move OffloadKit.app to /Applications before enabling Finder Quick Actions. Expected executable: {PRODUCTION_EXECUTABLE_PATH}"
+            ),
+        ));
+    }
+    ensure_services_root(services_root)?;
+    let workflows = render_workflows(executable).map_err(|error| {
+        FinderIntegrationError::new(
+            "workflowRenderFailed",
+            format!("Cannot render Finder Quick Actions: {error}"),
+        )
+    })?;
+    let transaction_id = uuid::Uuid::new_v4();
+    let staging = services_root.join(format!(".offloadkit-finder-staging-{transaction_id}"));
+    let backup = services_root.join(format!(".offloadkit-finder-backup-{transaction_id}"));
+
+    if let Err(error) = stage_workflows(&staging, &workflows) {
+        let _ = remove_path_if_exists(&staging);
+        return Err(FinderIntegrationError::new(
+            "workflowInstallFailed",
+            format!("Cannot stage Finder Quick Actions: {error}"),
+        ));
+    }
+
+    let mut installed = Vec::new();
+    let mut backed_up = Vec::new();
+    let transaction = (|| {
+        for (index, workflow) in workflows.iter().enumerate() {
+            let destination = services_root.join(workflow.bundle_name);
+            if fs::symlink_metadata(&destination).is_ok() {
+                fs::create_dir_all(&backup)?;
+                let backup_path = backup.join(workflow.bundle_name);
+                fs::rename(&destination, &backup_path)?;
+                backed_up.push(workflow.bundle_name);
+            }
+            if fail_after == Some(index) {
+                return Err(io::Error::other(
+                    "simulated Finder workflow install failure",
+                ));
+            }
+            fs::rename(staging.join(workflow.bundle_name), &destination)?;
+            installed.push(workflow.bundle_name);
+        }
+        let status = status_at(services_root, executable, require_production_executable)
+            .map_err(|error| io::Error::other(error.message))?;
+        if !status.healthy {
+            return Err(io::Error::other(status.message.unwrap_or_else(|| {
+                "Finder workflow read-back was unhealthy".to_owned()
+            })));
+        }
+        Ok(status)
+    })();
+
+    match transaction {
+        Ok(status) => {
+            remove_path_if_exists(&staging).map_err(|error| {
+                FinderIntegrationError::new(
+                    "workflowInstallFailed",
+                    format!("Installed workflows but cannot remove staging: {error}"),
+                )
+            })?;
+            remove_path_if_exists(&backup).map_err(|error| {
+                FinderIntegrationError::new(
+                    "workflowInstallFailed",
+                    format!("Installed workflows but cannot remove backup: {error}"),
+                )
+            })?;
+            Ok(status)
+        }
+        Err(error) => {
+            let rollback =
+                rollback_install(services_root, &staging, &backup, &installed, &backed_up);
+            let rollback_message = match rollback {
+                Ok(()) => "previous workflows were restored".to_owned(),
+                Err(rollback_error) => format!("rollback also failed: {rollback_error}"),
+            };
+            Err(FinderIntegrationError::new(
+                "workflowInstallFailed",
+                format!("Cannot install Finder Quick Actions: {error}; {rollback_message}"),
+            ))
+        }
+    }
+}
+
+fn ensure_services_root(services_root: &Path) -> Result<(), FinderIntegrationError> {
+    if !services_root.is_absolute() {
+        return Err(FinderIntegrationError::new(
+            "invalidServicesPath",
+            "Finder Services path must be absolute",
+        ));
+    }
+    fs::create_dir_all(services_root).map_err(|error| {
+        FinderIntegrationError::new(
+            "servicesCreateFailed",
+            format!(
+                "Cannot create Finder Services directory {}: {error}",
+                services_root.display()
+            ),
+        )
+    })?;
+    reject_symlink_components(services_root).map_err(|error| {
+        FinderIntegrationError::new(
+            "unsafeServicesPath",
+            format!("Finder Services path is unsafe: {error}"),
+        )
+    })?;
+    let metadata = fs::symlink_metadata(services_root).map_err(|error| {
+        FinderIntegrationError::new(
+            "servicesReadFailed",
+            format!("Cannot inspect Finder Services directory: {error}"),
+        )
+    })?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(FinderIntegrationError::new(
+            "unsafeServicesPath",
+            "Finder Services path must be a real directory",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_symlink_components(path: &Path) -> io::Result<()> {
+    for component in path.ancestors() {
+        match fs::symlink_metadata(component) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("filesystem link is not allowed: {}", component.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn stage_workflows(staging: &Path, workflows: &[RenderedWorkflow]) -> io::Result<()> {
+    fs::create_dir(staging)?;
+    for workflow in workflows {
+        let contents = staging.join(workflow.bundle_name).join("Contents");
+        fs::create_dir_all(&contents)?;
+        write_synced(&contents.join("Info.plist"), &workflow.info_plist)?;
+        write_synced(&contents.join("document.wflow"), &workflow.document_wflow)?;
+        if !workflow_matches(&staging.join(workflow.bundle_name), workflow)? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("staged workflow failed read-back: {}", workflow.bundle_name),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn write_synced(path: &Path, contents: &str) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(contents.as_bytes())?;
+    file.sync_all()
+}
+
+fn workflow_matches(bundle: &Path, expected: &RenderedWorkflow) -> io::Result<bool> {
+    let metadata = match fs::symlink_metadata(bundle) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let contents = bundle.join("Contents");
+    let contents_metadata = match fs::symlink_metadata(&contents) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if !contents_metadata.is_dir() || contents_metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    file_matches(&contents.join("Info.plist"), expected.info_plist.as_bytes()).and_then(
+        |info_matches| {
+            if !info_matches {
+                return Ok(false);
+            }
+            file_matches(
+                &contents.join("document.wflow"),
+                expected.document_wflow.as_bytes(),
+            )
+        },
+    )
+}
+
+fn file_matches(path: &Path, expected: &[u8]) -> io::Result<bool> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    Ok(fs::read(path)? == expected)
+}
+
+fn rollback_install(
+    services_root: &Path,
+    staging: &Path,
+    backup: &Path,
+    installed: &[&str],
+    backed_up: &[&str],
+) -> io::Result<()> {
+    let mut errors = Vec::new();
+    for bundle_name in installed.iter().rev() {
+        if let Err(error) = remove_path_if_exists(&services_root.join(bundle_name)) {
+            errors.push(format!("remove {bundle_name}: {error}"));
+        }
+    }
+    for bundle_name in backed_up.iter().rev() {
+        let backup_path = backup.join(bundle_name);
+        if fs::symlink_metadata(&backup_path).is_ok() {
+            if let Err(error) = fs::rename(&backup_path, services_root.join(bundle_name)) {
+                errors.push(format!("restore {bundle_name}: {error}"));
+            }
+        }
+    }
+    for path in [staging, backup] {
+        if let Err(error) = remove_path_if_exists(path) {
+            errors.push(format!("remove {}: {error}", path.display()));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(io::Error::other(errors.join("; ")))
+    }
+}
+
+fn remove_path_if_exists(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => remove_path(path),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_path(path: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return fs::remove_file(path).or_else(|_| fs::remove_dir(path));
+    }
+    if metadata.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn services_root_for_current_user() -> Result<PathBuf, FinderIntegrationError> {
+    let home = std::env::var_os("HOME").ok_or_else(|| {
+        FinderIntegrationError::new(
+            "homeDirectoryUnavailable",
+            "Cannot resolve HOME for the current macOS user",
+        )
+    })?;
+    let home = PathBuf::from(home);
+    if !home.is_absolute() {
+        return Err(FinderIntegrationError::new(
+            "homeDirectoryUnavailable",
+            "The current macOS HOME path is not absolute",
+        ));
+    }
+    Ok(home.join("Library/Services"))
+}
+
+#[cfg(target_os = "macos")]
+fn current_executable() -> Result<PathBuf, FinderIntegrationError> {
+    std::env::current_exe().map_err(|error| {
+        FinderIntegrationError::new(
+            "currentExecutableUnavailable",
+            format!("Cannot resolve the OffloadKit executable: {error}"),
+        )
+    })
+}
+
+#[cfg(target_os = "macos")]
+pub fn finder_integration_status_for_current_user(
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    status_at(
+        &services_root_for_current_user()?,
+        &current_executable()?,
+        true,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn finder_integration_status_for_current_user(
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    Ok(unsupported_status())
+}
+
+#[cfg(target_os = "macos")]
+pub fn install_finder_integration_for_current_user(
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    let mut status = install_at(
+        &services_root_for_current_user()?,
+        &current_executable()?,
+        true,
+    )?;
+    append_refresh_guidance(&mut status, refresh_services_cache());
+    Ok(status)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn install_finder_integration_for_current_user(
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    Err(FinderIntegrationError::new(
+        "unsupportedPlatform",
+        "Finder Quick Actions are only available on macOS",
+    ))
+}
+
+#[cfg(target_os = "macos")]
+pub fn uninstall_finder_integration_for_current_user(
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    let executable = current_executable()?;
+    let mut status = uninstall_at(&services_root_for_current_user()?, &executable, true)?;
+    append_refresh_guidance(&mut status, refresh_services_cache());
+    Ok(status)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn uninstall_finder_integration_for_current_user(
+) -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    Err(FinderIntegrationError::new(
+        "unsupportedPlatform",
+        "Finder Quick Actions are only available on macOS",
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn unsupported_status() -> FinderIntegrationStatus {
+    FinderIntegrationStatus {
+        supported: false,
+        installed: false,
+        healthy: false,
+        misplaced_app: false,
+        executable_path: String::new(),
+        expected_workflows: 0,
+        installed_workflows: 0,
+        matching_workflows: 0,
+        problems: vec!["Finder Quick Actions are only available on macOS".to_owned()],
+        message: Some("Finder Quick Actions are only available on macOS".to_owned()),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn refresh_services_cache() -> Option<String> {
+    let tool = Path::new("/System/Library/CoreServices/pbs");
+    let refreshed = tool.is_file()
+        && std::process::Command::new(tool)
+            .arg("-flush")
+            .status()
+            .is_ok_and(|status| status.success());
+    (!refreshed).then(|| {
+        "Quick Actions are installed, but macOS did not refresh the Services cache. Relaunch Finder or log out and back in if the menu does not update.".to_owned()
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn append_refresh_guidance(status: &mut FinderIntegrationStatus, guidance: Option<String>) {
+    if let Some(guidance) = guidance {
+        status.message = Some(match status.message.take() {
+            Some(message) => format!("{message}; {guidance}"),
+            None => guidance,
+        });
+    }
+}
+
+#[tauri::command]
+pub fn install_finder_integration() -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    install_finder_integration_for_current_user()
+}
+
+#[tauri::command]
+pub fn uninstall_finder_integration() -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    uninstall_finder_integration_for_current_user()
+}
+
+#[tauri::command]
+pub fn finder_integration_status() -> Result<FinderIntegrationStatus, FinderIntegrationError> {
+    finder_integration_status_for_current_user()
 }
 
 #[derive(Clone, Copy)]
@@ -223,11 +802,15 @@ fn xml_escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_workflows, PRODUCTION_EXECUTABLE_PATH};
+    use super::{
+        install_at, install_at_with_failure, render_workflows, status_at, uninstall_at,
+        PRODUCTION_EXECUTABLE_PATH,
+    };
     use crate::explorer_integration::ExplorerAction;
     use quick_xml::events::Event;
     use quick_xml::Reader;
     use std::path::Path;
+    use tempfile::tempdir;
 
     #[test]
     fn renders_four_named_workflow_bundles_with_fixed_actions_and_executable() {
@@ -296,6 +879,95 @@ mod tests {
             assert!(!workflow.document_wflow.contains("eval "));
             assert!(!workflow.document_wflow.contains("$*"));
         }
+    }
+
+    #[test]
+    fn install_status_and_uninstall_manage_only_four_offloadkit_workflows() {
+        let temp = tempdir().unwrap();
+        let services = temp.path().join("Library/Services");
+        let unrelated = services.join("Another App.workflow/Contents/document.wflow");
+        std::fs::create_dir_all(unrelated.parent().unwrap()).unwrap();
+        std::fs::write(&unrelated, "keep me").unwrap();
+        let executable = Path::new(PRODUCTION_EXECUTABLE_PATH);
+
+        let installed = install_at(&services, executable, false).unwrap();
+        let status = status_at(&services, executable, false).unwrap();
+
+        assert!(installed.installed && installed.healthy);
+        assert_eq!(status.installed_workflows, 4);
+        assert_eq!(status.matching_workflows, 4);
+        for workflow in render_workflows(executable).unwrap() {
+            assert!(services
+                .join(workflow.bundle_name)
+                .join("Contents/Info.plist")
+                .is_file());
+            assert!(services
+                .join(workflow.bundle_name)
+                .join("Contents/document.wflow")
+                .is_file());
+        }
+
+        let first = uninstall_at(&services, executable, false).unwrap();
+        let second = uninstall_at(&services, executable, false).unwrap();
+        assert!(!first.installed && !second.installed);
+        assert_eq!(std::fs::read_to_string(unrelated).unwrap(), "keep me");
+    }
+
+    #[test]
+    fn status_detects_corruption_and_reinstall_repairs_the_executable_path() {
+        let temp = tempdir().unwrap();
+        let services = temp.path().join("Services");
+        let old_executable =
+            Path::new("/Applications/Old OffloadKit.app/Contents/MacOS/offloadkit");
+        install_at(&services, old_executable, false).unwrap();
+        let corrupt = services.join("OffloadKit Copy.workflow/Contents/document.wflow");
+        std::fs::write(&corrupt, "corrupt").unwrap();
+
+        let unhealthy = status_at(&services, old_executable, false).unwrap();
+        assert!(unhealthy.installed);
+        assert!(!unhealthy.healthy);
+        assert_eq!(unhealthy.matching_workflows, 3);
+
+        let repaired = install_at(&services, Path::new(PRODUCTION_EXECUTABLE_PATH), false).unwrap();
+        assert!(repaired.healthy);
+        let document = std::fs::read_to_string(corrupt).unwrap();
+        assert!(document.contains(PRODUCTION_EXECUTABLE_PATH));
+        assert!(!document.contains("Old OffloadKit.app"));
+    }
+
+    #[test]
+    fn production_install_rejects_an_executable_outside_the_fixed_app_bundle() {
+        let temp = tempdir().unwrap();
+        let services = temp.path().join("Services");
+        let misplaced =
+            Path::new("/Users/operator/Downloads/OffloadKit.app/Contents/MacOS/offloadkit");
+
+        let error = install_at(&services, misplaced, true).unwrap_err();
+        let status = status_at(&services, misplaced, true).unwrap();
+
+        assert_eq!(error.code, "misplacedApplication");
+        assert!(error.message.contains("/Applications/OffloadKit.app"));
+        assert!(status.misplaced_app);
+        assert!(!status.healthy);
+        assert!(status.message.unwrap().contains("Applications"));
+        assert!(!services.exists());
+    }
+
+    #[test]
+    fn failed_install_rolls_back_to_the_previous_healthy_workflows() {
+        let temp = tempdir().unwrap();
+        let services = temp.path().join("Services");
+        let old_executable = Path::new("/Applications/Previous.app/Contents/MacOS/offloadkit");
+        install_at(&services, old_executable, false).unwrap();
+
+        let failure =
+            install_at_with_failure(&services, Path::new(PRODUCTION_EXECUTABLE_PATH), false, 2)
+                .unwrap_err();
+
+        assert_eq!(failure.code, "workflowInstallFailed");
+        let rolled_back = status_at(&services, old_executable, false).unwrap();
+        assert!(rolled_back.healthy);
+        assert_eq!(rolled_back.matching_workflows, 4);
     }
 
     fn assert_xml(xml: &str) {
