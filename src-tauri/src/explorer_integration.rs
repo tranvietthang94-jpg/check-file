@@ -1703,8 +1703,8 @@ mod tests {
         parse_explorer_activation, parse_explorer_request, prepare_request_with_clipboard,
         uninstall_with_registry, validate_paste_destination_with_probe, ExplorerAction,
         ExplorerActivation, ExplorerEvent, ExplorerPendingState, MemoryFileDropClipboard,
-        MemoryRegistry, RegistryAccess, RegistryScope, ExplorerCopyAggregationState,
-        TestRegistryNamespace,
+        MemoryRegistry, NativeFileDropClipboard, RegistryAccess, RegistryScope,
+        ExplorerCopyAggregationState, TestRegistryNamespace,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -2084,6 +2084,101 @@ mod tests {
         assert!(keys.contains(
             &r"Software\Classes\Directory\Background\shell\OffloadKit.Paste"
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "replaces the real Windows clipboard and leaves an inspectable temp smoke tree"]
+    fn phase13b_real_windows_file_drop_and_selected_copy_smoke() {
+        use crate::checksum::{hash_file, ChecksumAlgorithm};
+        use crate::copy_engine::{
+            run_copy_core_with_selection, ProgressPayload, ProgressSink, VerificationMode,
+        };
+        use crate::organize::OrganizeSettings;
+        use std::sync::atomic::AtomicBool;
+
+        struct NoopSink;
+        impl ProgressSink for NoopSink {
+            fn on_scan(&self, _total_files: u64, _total_bytes: u64) {}
+            fn on_progress(&self, _payload: ProgressPayload) {}
+        }
+
+        let smoke_root = std::env::temp_dir().join(format!(
+            "OffloadKit-Phase13B-Smoke-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let source = smoke_root.join("source");
+        let destination = smoke_root.join("destination");
+        let selected_folder = source.join("CARD_A");
+        let selected_video = selected_folder.join("DCIM").join("A001.mov");
+        let selected_audio = source.join("AUDIO").join("A001.wav");
+        let unselected = source.join("PRIVATE").join("leave.txt");
+        fs::create_dir_all(selected_video.parent().unwrap()).unwrap();
+        fs::create_dir_all(selected_audio.parent().unwrap()).unwrap();
+        fs::create_dir_all(unselected.parent().unwrap()).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(&selected_video, b"phase13b selected video bytes").unwrap();
+        fs::write(&selected_audio, b"phase13b selected audio bytes").unwrap();
+        fs::write(&unselected, b"must remain source-only").unwrap();
+
+        let copy = parse_explorer_request(explorer_args(
+            "copy",
+            &[&selected_folder, &selected_audio],
+        ))
+        .unwrap();
+        let copy = prepare_request_with_clipboard(copy, &NativeFileDropClipboard).unwrap();
+        assert_eq!(copy.paths.len(), 2);
+
+        let paste =
+            parse_explorer_request(explorer_args("paste", &[&destination])).unwrap();
+        let paste = prepare_request_with_clipboard(paste, &NativeFileDropClipboard).unwrap();
+        let selection = paste.source_selection.unwrap();
+        let outcome = run_copy_core_with_selection(
+            &NoopSink,
+            "phase13b-real-smoke".to_string(),
+            &selection,
+            &destination,
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Sha1,
+            "Phase13B Smoke",
+            &OrganizeSettings::default(),
+            false,
+            false,
+            None,
+        );
+
+        let destination_video = destination.join("CARD_A").join("DCIM").join("A001.mov");
+        let destination_audio = destination.join("AUDIO").join("A001.wav");
+        let source_video_hash = hash_file(&selected_video, ChecksumAlgorithm::Sha1).unwrap();
+        let destination_video_hash =
+            hash_file(&destination_video, ChecksumAlgorithm::Sha1).unwrap();
+        let source_audio_hash = hash_file(&selected_audio, ChecksumAlgorithm::Sha1).unwrap();
+        let destination_audio_hash =
+            hash_file(&destination_audio, ChecksumAlgorithm::Sha1).unwrap();
+
+        assert!(!outcome.cancelled);
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(outcome.files_copied, 2);
+        assert_eq!(outcome.verified_files.len(), 2);
+        assert_eq!(outcome.mhl_entries.len(), 2);
+        assert!(outcome.missing_files.is_empty());
+        assert_eq!(source_video_hash, destination_video_hash);
+        assert_eq!(source_audio_hash, destination_audio_hash);
+        assert!(selected_video.exists());
+        assert!(selected_audio.exists());
+        assert!(unselected.exists());
+        assert!(!destination.join("PRIVATE").exists());
+
+        println!("SMOKE_ROOT={}", smoke_root.display());
+        println!("SOURCE_VIDEO={}", selected_video.display());
+        println!("DESTINATION_VIDEO={}", destination_video.display());
+        println!("VIDEO_SHA1={source_video_hash}");
+        println!("SOURCE_AUDIO={}", selected_audio.display());
+        println!("DESTINATION_AUDIO={}", destination_audio.display());
+        println!("AUDIO_SHA1={source_audio_hash}");
+        println!("SOURCE_PRESERVED=true");
+        println!("UNSELECTED_DESTINATION_ABSENT=true");
     }
 
     #[cfg(windows)]
