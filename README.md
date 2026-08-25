@@ -35,6 +35,12 @@ Download installers from the [Releases](https://github.com/tranvietthang94-jpg/c
   - Copy selections through the native Windows File Drop clipboard and Paste them into a selected folder with the current verification settings.
   - Preserve selected-path layout, deduplicate repeated paths and prune nested selections.
   - Reject filesystem links/reparse points, overlapping Source/Destination paths and destinations that fail a write probe.
+- macOS Finder Quick Actions (opt-in from Preferences):
+  - Install exactly four workflows in `~/Library/Services`: `OffloadKit Set Source.workflow`, `OffloadKit Set Destination.workflow`, `OffloadKit Copy.workflow` and `OffloadKit Paste.workflow`.
+  - Use the native macOS file-URL pasteboard while preserving the same selected-path copy and verification pipeline as Windows.
+  - Keep Paste in copy mode: neither source-removal option is enabled by a Finder request.
+  - Require the production app at `/Applications/OffloadKit.app`; an app launched elsewhere reports guidance instead of installing workflows with a stale executable path.
+  - Reject malformed actions, missing paths, links, overlapping endpoints and destinations that fail the write probe.
 - Automatic Repair Planner:
   - Finds candidate copies from Source and sibling Destinations.
   - Accepts only a full checksum match against the MHL.
@@ -84,6 +90,14 @@ GitHub Actions builds:
 - macOS Apple Silicon: `.dmg` and app archive
 
 The application is currently intended for personal/local use. macOS signing and notarization may require additional release configuration on the maintainer's Apple account.
+
+### Enable Finder Quick Actions on macOS
+
+1. Move `OffloadKit.app` to `/Applications/OffloadKit.app` and launch it from there.
+2. Open **Preferences > General** and enable **Finder Quick Actions**.
+3. In Finder, select files or folders and use **Quick Actions** (or **Services**) to choose one of the four OffloadKit actions.
+
+Disabling the preference removes only the four OffloadKit workflow bundles. It leaves other services untouched. These local builds are not claimed to be Apple-signed or notarized; macOS may therefore show its normal security confirmation before first launch.
 
 ## Development
 
