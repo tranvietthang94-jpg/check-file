@@ -19,6 +19,62 @@ import type { MhlVerifyReport, RepairPlan } from "../types/mhl";
 import type { TransferLogEntry } from "../types/transferLog";
 import type { QueueMode } from "../types/queue";
 
+export type ExplorerAction = "setSource" | "setDestination";
+
+export interface ExplorerRequest {
+  id: string;
+  action: ExplorerAction;
+  paths: string[];
+}
+
+export interface ExplorerErrorPayload {
+  id: string;
+  message: string;
+}
+
+function hasTauriRuntime(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function listenForExplorerEvent<T>(
+  eventName: string,
+  browserTestEventName: string,
+  callback: (payload: T) => void,
+): Promise<UnlistenFn> {
+  if (hasTauriRuntime()) {
+    return listen<T>(eventName, (event) => callback(event.payload));
+  }
+
+  const handler = ((event: CustomEvent<T>) => callback(event.detail)) as EventListener;
+  window.addEventListener(browserTestEventName, handler);
+  return Promise.resolve(() => window.removeEventListener(browserTestEventName, handler));
+}
+
+export function onExplorerRequest(
+  callback: (request: ExplorerRequest) => void,
+): Promise<UnlistenFn> {
+  return listenForExplorerEvent("explorer://request", "offloadkit-test:explorer-request", callback);
+}
+
+export function onExplorerError(
+  callback: (error: ExplorerErrorPayload) => void,
+): Promise<UnlistenFn> {
+  return listenForExplorerEvent("explorer://error", "offloadkit-test:explorer-error", callback);
+}
+
+export function explorerFrontendReady(): Promise<void> {
+  if (!hasTauriRuntime()) return Promise.resolve();
+  return invoke<void>("explorer_frontend_ready");
+}
+
+export function acknowledgeExplorerRequest(requestId: string): Promise<void> {
+  if (!hasTauriRuntime()) {
+    window.dispatchEvent(new CustomEvent("offloadkit-test:explorer-ack", { detail: requestId }));
+    return Promise.resolve();
+  }
+  return invoke<void>("acknowledge_explorer_request", { requestId });
+}
+
 export function listDisks(): Promise<DiskInfo[]> {
   return invoke<DiskInfo[]>("list_disks");
 }

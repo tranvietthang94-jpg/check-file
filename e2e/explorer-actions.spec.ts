@@ -76,3 +76,103 @@ test.describe("path-based endpoint store", () => {
     await expect(card.getByTitle("Tháo")).toHaveCount(0);
   });
 });
+
+test.describe("Explorer frontend event bridge", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/?referenceFixture=disks");
+    await page.evaluate(async () => {
+      const { useDisksStore } = await import("/src/state/disksStore.ts");
+      useDisksStore.getState().setEndpoints([], []);
+      const testWindow = window as Window & { __OFFLOADKIT_TEST_ACKS__?: string[] };
+      testWindow.__OFFLOADKIT_TEST_ACKS__ = [];
+      window.addEventListener("offloadkit-test:explorer-ack", ((event: CustomEvent<string>) => {
+        testWindow.__OFFLOADKIT_TEST_ACKS__?.push(event.detail);
+      }) as EventListener);
+    });
+  });
+
+  test("set-source event adds Source once, acknowledges, and starts no transfer", async ({ page }) => {
+    await page.evaluate(() => {
+      const request = {
+        id: "source-request-1",
+        action: "setSource",
+        paths: ["F:\\Adobe Premiere Pro Auto-Save"],
+      };
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-request", { detail: request }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-request", { detail: request }),
+      );
+    });
+
+    await expect(page.getByTestId("source-endpoint-card")).toHaveCount(1);
+    await expect(page.getByTestId("source-endpoint-card")).toContainText(
+      "F:\\Adobe Premiere Pro Auto-Save",
+    );
+    await expect.poll(() => page.evaluate(() =>
+      (window as Window & { __OFFLOADKIT_TEST_ACKS__?: string[] }).__OFFLOADKIT_TEST_ACKS__,
+    )).toEqual(["source-request-1"]);
+    const jobCount = await page.evaluate(async () => {
+      const { useTransfersStore } = await import("/src/state/transfersStore.ts");
+      return Object.keys(useTransfersStore.getState().jobs).length;
+    });
+    expect(jobCount).toBe(0);
+  });
+
+  test("set-destination event adds Destination", async ({ page }) => {
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-request", {
+          detail: {
+            id: "destination-request-1",
+            action: "setDestination",
+            paths: ["F:\\BACKUP HXM"],
+          },
+        }),
+      );
+    });
+
+    await expect(page.getByTestId("destination-endpoint-card")).toHaveCount(1);
+    await expect(page.getByTestId("destination-endpoint-card")).toContainText("F:\\BACKUP HXM");
+  });
+
+  test("invalid activation displays a clear error", async ({ page }) => {
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-error", {
+          detail: { id: "invalid-request-1", message: "Explorer path does not exist" },
+        }),
+      );
+    });
+
+    await expect(page.getByRole("alert")).toContainText("Explorer path does not exist");
+  });
+
+  test("request received before hydration waits until the store is ready", async ({ page }) => {
+    const beforeReady = await page.evaluate(async () => {
+      const { useExplorerActionStore } = await import("/src/state/explorerActionStore.ts");
+      const { useDisksStore } = await import("/src/state/disksStore.ts");
+      useExplorerActionStore.setState({ ready: false });
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-request", {
+          detail: {
+            id: "startup-request-1",
+            action: "setSource",
+            paths: ["F:\\Startup Source"],
+          },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return useDisksStore.getState().sources.length;
+    });
+    expect(beforeReady).toBe(0);
+
+    await page.evaluate(async () => {
+      const { useExplorerActionStore } = await import("/src/state/explorerActionStore.ts");
+      await useExplorerActionStore.getState().markReady();
+    });
+
+    await expect(page.getByTestId("source-endpoint-card")).toContainText("F:\\Startup Source");
+  });
+});

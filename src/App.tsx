@@ -10,12 +10,15 @@ import {
   onCopyProgress,
   onCopyScan,
   onDisksChanged,
+  onExplorerError,
+  onExplorerRequest,
   onMediaScanComplete,
   onMediaScanItem,
   onTransferGroupJobAdded,
   resolveBrokenMedia,
   startMediaScan,
   startTransferGroup,
+  explorerFrontendReady,
 } from "./lib/tauri";
 import { useDisksStore } from "./state/disksStore";
 import { useTransfersStore } from "./state/transfersStore";
@@ -24,6 +27,7 @@ import { useGroupsStore } from "./state/groupsStore";
 import { useMediaStore } from "./state/mediaStore";
 import { useOrganizeStore } from "./state/organizeStore";
 import { useTransferLogStore } from "./state/transferLogStore";
+import { useExplorerActionStore } from "./state/explorerActionStore";
 import { DisksPanel } from "./components/DisksPanel";
 import { ElementsReviewPanel } from "./components/ElementsReviewPanel";
 import { EndpointList } from "./components/EndpointList";
@@ -78,6 +82,7 @@ function App() {
   const [reportsOpen, setReportsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [startTransferError, setStartTransferError] = useState<string | null>(null);
+  const [endpointStoresReady, setEndpointStoresReady] = useState(false);
   const autoEjectedGroups = useRef(new Set<string>());
   // Matches OffShoot's own hamburger menu -- Transfer Logs/Reports/Settings
   // open as their own windows from here rather than living permanently
@@ -99,6 +104,13 @@ function App() {
   const setDestinationPath = useDisksStore((s) => s.setDestinationPath);
   const reorderDestinations = useDisksStore((s) => s.reorderDestinations);
   const clearSourcesAndDestinations = useDisksStore((s) => s.clearSourcesAndDestinations);
+
+  const explorerListenersReady = useExplorerActionStore((s) => s.listenersReady);
+  const explorerFeedback = useExplorerActionStore((s) => s.feedback);
+  const receiveExplorerRequest = useExplorerActionStore((s) => s.receiveRequest);
+  const receiveExplorerError = useExplorerActionStore((s) => s.receiveError);
+  const markExplorerListenersReady = useExplorerActionStore((s) => s.markListenersReady);
+  const markExplorerReady = useExplorerActionStore((s) => s.markReady);
 
   const jobs = useTransfersStore((s) => s.jobs);
   const addJob = useTransfersStore((s) => s.addJob);
@@ -194,6 +206,58 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    let unlisteners: Array<() => void> = [];
+    Promise.all([
+      onExplorerRequest((request) => void receiveExplorerRequest(request)),
+      onExplorerError(receiveExplorerError),
+    ])
+      .then((registered) => {
+        if (disposed) registered.forEach((unlisten) => unlisten());
+        else {
+          unlisteners = registered;
+          markExplorerListenersReady();
+        }
+      })
+      .catch((error) =>
+        receiveExplorerError({ id: "explorer-listener-registration", message: String(error) }),
+      );
+    return () => {
+      disposed = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [markExplorerListenersReady, receiveExplorerError, receiveExplorerRequest]);
+
+  useEffect(() => {
+    if (!endpointStoresReady || !explorerListenersReady) return;
+    let started = false;
+    const start = () => {
+      if (started) return;
+      if (!useSettingsStore.persist.hasHydrated() || !useOrganizeStore.persist.hasHydrated()) {
+        return;
+      }
+      started = true;
+      markExplorerReady()
+        .then(explorerFrontendReady)
+        .catch((error) =>
+          receiveExplorerError({ id: "explorer-frontend-ready", message: String(error) }),
+        );
+    };
+    const unlistenSettings = useSettingsStore.persist.onFinishHydration(start);
+    const unlistenOrganize = useOrganizeStore.persist.onFinishHydration(start);
+    start();
+    return () => {
+      unlistenSettings();
+      unlistenOrganize();
+    };
+  }, [
+    endpointStoresReady,
+    explorerListenersReady,
+    markExplorerReady,
+    receiveExplorerError,
+  ]);
+
+  useEffect(() => {
     const fixture = referenceFixture();
     if (fixture) {
       setDisks(referenceDisks);
@@ -207,12 +271,13 @@ function App() {
         setGroups(fixture === "autoEject" ? autoEjectGroups : autoEjectPendingGroups);
         setView("transfers");
       }
+      setEndpointStoresReady(true);
       return;
     }
 
     let unlisten: (() => void) | undefined;
 
-    listDisks().then(setDisks).catch(console.error);
+    listDisks().then(setDisks).catch(console.error).finally(() => setEndpointStoresReady(true));
     onDisksChanged(setDisks).then((fn) => {
       unlisten = fn;
     });
@@ -552,6 +617,20 @@ function App() {
           />
         </div>
       </div>
+
+      {explorerFeedback && (
+        <div
+          role={explorerFeedback.kind === "error" ? "alert" : "status"}
+          data-testid="explorer-feedback"
+          className={`mb-4 rounded border px-3 py-2 text-xs ${
+            explorerFeedback.kind === "error"
+              ? "border-red-800 bg-red-950/60 text-red-300"
+              : "border-green-800 bg-green-950/60 text-green-300"
+          }`}
+        >
+          {explorerFeedback.message}
+        </div>
+      )}
 
       {appMenu && (
         <DiskContextMenu
