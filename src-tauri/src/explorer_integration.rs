@@ -2,13 +2,18 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use std::{collections::HashSet, collections::VecDeque};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::source_selection::SourceSelection;
+
 const MAX_EXPLORER_PATHS: usize = 100;
+const COPY_AGGREGATION_WINDOW: Duration = Duration::from_millis(250);
 pub const EXPLORER_REQUEST_EVENT: &str = "explorer://request";
 pub const EXPLORER_ERROR_EVENT: &str = "explorer://error";
 
@@ -17,6 +22,8 @@ pub const EXPLORER_ERROR_EVENT: &str = "explorer://error";
 pub enum ExplorerAction {
     SetSource,
     SetDestination,
+    Copy,
+    Paste,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -25,6 +32,10 @@ pub struct ExplorerRequest {
     pub id: String,
     pub action: ExplorerAction,
     pub paths: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_selection: Option<SourceSelection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,11 +82,17 @@ struct ExplorerVerb {
     single_selection: bool,
 }
 
-const EXPLORER_VERBS: [ExplorerVerb; 5] = [
+const EXPLORER_VERBS: [ExplorerVerb; 9] = [
     ExplorerVerb {
         key: r"Software\Classes\*\shell\OffloadKit.SetSource",
         label: "Đặt làm Source trong OffloadKit",
         action: ExplorerAction::SetSource,
+        single_selection: false,
+    },
+    ExplorerVerb {
+        key: r"Software\Classes\*\shell\OffloadKit.Copy",
+        label: "Copy bằng OffloadKit",
+        action: ExplorerAction::Copy,
         single_selection: false,
     },
     ExplorerVerb {
@@ -91,6 +108,18 @@ const EXPLORER_VERBS: [ExplorerVerb; 5] = [
         single_selection: true,
     },
     ExplorerVerb {
+        key: r"Software\Classes\Directory\shell\OffloadKit.Copy",
+        label: "Copy bằng OffloadKit",
+        action: ExplorerAction::Copy,
+        single_selection: false,
+    },
+    ExplorerVerb {
+        key: r"Software\Classes\Directory\shell\OffloadKit.Paste",
+        label: "Paste và bắt đầu transfer bằng OffloadKit",
+        action: ExplorerAction::Paste,
+        single_selection: true,
+    },
+    ExplorerVerb {
         key: r"Software\Classes\Directory\Background\shell\OffloadKit.SetSource",
         label: "Đặt thư mục hiện tại làm Source trong OffloadKit",
         action: ExplorerAction::SetSource,
@@ -100,6 +129,12 @@ const EXPLORER_VERBS: [ExplorerVerb; 5] = [
         key: r"Software\Classes\Directory\Background\shell\OffloadKit.SetDestination",
         label: "Đặt thư mục hiện tại làm Destination trong OffloadKit",
         action: ExplorerAction::SetDestination,
+        single_selection: true,
+    },
+    ExplorerVerb {
+        key: r"Software\Classes\Directory\Background\shell\OffloadKit.Paste",
+        label: "Paste và bắt đầu transfer bằng OffloadKit",
+        action: ExplorerAction::Paste,
         single_selection: true,
     },
 ];
@@ -176,6 +211,8 @@ fn build_registry_command(
     let action = match action {
         ExplorerAction::SetSource => "set-source",
         ExplorerAction::SetDestination => "set-destination",
+        ExplorerAction::Copy => "copy",
+        ExplorerAction::Paste => "paste",
     };
     Ok(format!(
         "{} --explorer-action {action} --path \"%V\"",
@@ -836,6 +873,489 @@ impl fmt::Display for ExplorerRequestError {
 
 impl Error for ExplorerRequestError {}
 
+trait FileDropClipboard {
+    fn read_paths(&self) -> Result<Vec<PathBuf>, ExplorerRequestError>;
+    fn write_paths(&self, paths: &[PathBuf]) -> Result<(), ExplorerRequestError>;
+}
+
+#[derive(Default)]
+struct ExplorerCopyAggregationInner {
+    paths: Vec<PathBuf>,
+    last_update: Option<Instant>,
+}
+
+#[derive(Default)]
+pub struct ExplorerCopyAggregationState {
+    inner: Mutex<ExplorerCopyAggregationInner>,
+}
+
+impl ExplorerCopyAggregationState {
+    pub fn new(startup_activation: &ExplorerActivation) -> Self {
+        let state = Self::default();
+        if let ExplorerActivation::Request(request) = startup_activation {
+            if matches!(request.action, ExplorerAction::Copy) {
+                let mut inner = state.inner.lock().unwrap();
+                inner.paths = request.paths.clone();
+                inner.last_update = Some(Instant::now());
+            }
+        }
+        state
+    }
+
+    pub fn merge(&self, request: ExplorerRequest) -> ExplorerRequest {
+        self.merge_at(request, Instant::now())
+    }
+
+    fn merge_at(&self, mut request: ExplorerRequest, now: Instant) -> ExplorerRequest {
+        if !matches!(request.action, ExplorerAction::Copy) {
+            return request;
+        }
+        let mut inner = self.inner.lock().unwrap();
+        let within_window = inner
+            .last_update
+            .is_some_and(|last_update| now.duration_since(last_update) <= COPY_AGGREGATION_WINDOW);
+        if within_window {
+            let mut combined = inner.paths.clone();
+            combined.extend(request.paths);
+            request.paths = combined;
+        }
+        inner.paths = request.paths.clone();
+        inner.last_update = Some(now);
+        request
+    }
+}
+
+struct NativeFileDropClipboard;
+
+impl FileDropClipboard for NativeFileDropClipboard {
+    fn read_paths(&self) -> Result<Vec<PathBuf>, ExplorerRequestError> {
+        native_file_drop::read_paths().map_err(|error| {
+            ExplorerRequestError::new(format!("Cannot read Windows File Drop clipboard: {error}"))
+        })
+    }
+
+    fn write_paths(&self, paths: &[PathBuf]) -> Result<(), ExplorerRequestError> {
+        native_file_drop::write_paths(paths).map_err(|error| {
+            ExplorerRequestError::new(format!("Cannot write Windows File Drop clipboard: {error}"))
+        })
+    }
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct MemoryFileDropClipboard {
+    paths: Mutex<Vec<PathBuf>>,
+}
+
+#[cfg(test)]
+impl MemoryFileDropClipboard {
+    fn with_paths(paths: Vec<PathBuf>) -> Self {
+        Self {
+            paths: Mutex::new(paths),
+        }
+    }
+
+    fn paths(&self) -> Vec<PathBuf> {
+        self.paths.lock().unwrap().clone()
+    }
+}
+
+#[cfg(test)]
+impl FileDropClipboard for MemoryFileDropClipboard {
+    fn read_paths(&self) -> Result<Vec<PathBuf>, ExplorerRequestError> {
+        Ok(self.paths())
+    }
+
+    fn write_paths(&self, paths: &[PathBuf]) -> Result<(), ExplorerRequestError> {
+        *self.paths.lock().unwrap() = paths.to_vec();
+        Ok(())
+    }
+}
+
+fn build_file_drop_payload(paths: &[&Path]) -> io::Result<Vec<u8>> {
+    if paths.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "File Drop clipboard requires at least one path",
+        ));
+    }
+
+    let mut payload = vec![0u8; 20];
+    payload[0..4].copy_from_slice(&20u32.to_le_bytes());
+    payload[16..20].copy_from_slice(&1i32.to_le_bytes());
+    for path in paths {
+        let encoded = encode_path_wide(path);
+        if encoded.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("clipboard path contains a NUL character: {}", path.display()),
+            ));
+        }
+        for unit in encoded {
+            payload.extend_from_slice(&unit.to_le_bytes());
+        }
+        payload.extend_from_slice(&0u16.to_le_bytes());
+    }
+    payload.extend_from_slice(&0u16.to_le_bytes());
+    Ok(payload)
+}
+
+#[cfg(windows)]
+fn encode_path_wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    path.as_os_str().encode_wide().collect()
+}
+
+#[cfg(not(windows))]
+fn encode_path_wide(path: &Path) -> Vec<u16> {
+    path.to_string_lossy().encode_utf16().collect()
+}
+
+fn prepare_request_with_clipboard<C: FileDropClipboard>(
+    mut request: ExplorerRequest,
+    clipboard: &C,
+) -> Result<ExplorerRequest, ExplorerRequestError> {
+    match request.action {
+        ExplorerAction::Copy => {
+            request.paths = dedupe_paths(request.paths)?;
+            clipboard.write_paths(&request.paths)?;
+        }
+        ExplorerAction::Paste => {
+            let clipboard_paths = clipboard.read_paths()?;
+            if clipboard_paths.is_empty() {
+                return Err(ExplorerRequestError::new(
+                    "Windows clipboard does not contain any File Drop paths",
+                ));
+            }
+            if clipboard_paths.len() > MAX_EXPLORER_PATHS {
+                return Err(ExplorerRequestError::new(
+                    "Windows File Drop clipboard cannot contain more than 100 paths",
+                ));
+            }
+            let selection = SourceSelection::from_paths(clipboard_paths)
+                .map_err(|error| ExplorerRequestError::new(error.to_string()))?;
+            let destination = request.paths.first().cloned().ok_or_else(|| {
+                ExplorerRequestError::new("Explorer paste destination is missing")
+            })?;
+            validate_paste_destination_with_probe(
+                &selection,
+                &destination,
+                probe_destination_writable,
+            )?;
+            request.source_selection = Some(selection);
+            request.destination_path = Some(destination);
+        }
+        ExplorerAction::SetSource => {
+            request.paths = dedupe_paths(request.paths)?;
+            let is_file = request.paths.len() == 1
+                && fs::metadata(&request.paths[0])
+                    .map(|metadata| metadata.is_file())
+                    .unwrap_or(false);
+            if request.paths.len() > 1 || is_file {
+                request.source_selection = Some(
+                    SourceSelection::from_paths(request.paths.clone())
+                        .map_err(|error| ExplorerRequestError::new(error.to_string()))?,
+                );
+            }
+        }
+        ExplorerAction::SetDestination => {}
+    }
+    Ok(request)
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, ExplorerRequestError> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for path in paths {
+        if !path.is_absolute() {
+            return Err(ExplorerRequestError::new(format!(
+                "Explorer path must be absolute: {}",
+                path.display()
+            )));
+        }
+        let canonical = fs::canonicalize(&path).map_err(|error| {
+            ExplorerRequestError::new(format!(
+                "Cannot resolve Explorer path {}: {error}",
+                path.display()
+            ))
+        })?;
+        let key = path_key(&canonical);
+        if seen.insert(key) {
+            deduped.push(path);
+        }
+    }
+    if deduped.len() > MAX_EXPLORER_PATHS {
+        return Err(ExplorerRequestError::new(
+            "Explorer request cannot contain more than 100 unique paths",
+        ));
+    }
+    Ok(deduped)
+}
+
+fn validate_paste_destination_with_probe<F>(
+    selection: &SourceSelection,
+    destination: &Path,
+    writable_probe: F,
+) -> Result<(), ExplorerRequestError>
+where
+    F: FnOnce(&Path) -> io::Result<()>,
+{
+    let metadata = fs::metadata(destination).map_err(|error| {
+        ExplorerRequestError::new(format!(
+            "Cannot inspect Explorer paste destination {}: {error}",
+            destination.display()
+        ))
+    })?;
+    if !metadata.is_dir() {
+        return Err(ExplorerRequestError::new(
+            "Explorer paste destination must be a directory",
+        ));
+    }
+    reject_filesystem_links(destination)?;
+    let destination = fs::canonicalize(destination).map_err(|error| {
+        ExplorerRequestError::new(format!(
+            "Cannot resolve Explorer paste destination: {error}"
+        ))
+    })?;
+    for selected in selection.selected_paths() {
+        let selected = fs::canonicalize(selected).map_err(|error| {
+            ExplorerRequestError::new(format!("Cannot resolve selected source path: {error}"))
+        })?;
+        if paths_overlap(&selected, &destination) {
+            return Err(ExplorerRequestError::new(
+                "Explorer paste source and destination must not overlap",
+            ));
+        }
+    }
+    writable_probe(&destination).map_err(|error| {
+        ExplorerRequestError::new(format!(
+            "Explorer paste destination is not writable: {error}"
+        ))
+    })?;
+    Ok(())
+}
+
+fn probe_destination_writable(destination: &Path) -> io::Result<()> {
+    let probe = destination.join(format!(
+        ".offloadkit-write-probe-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let result = (|| {
+        let file = OpenOptions::new().write(true).create_new(true).open(&probe)?;
+        file.sync_all()?;
+        drop(file);
+        fs::remove_file(&probe)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&probe);
+    }
+    result
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    let left = path_key(left);
+    let right = path_key(right);
+    left == right
+        || left.starts_with(&format!("{right}\\"))
+        || right.starts_with(&format!("{left}\\"))
+}
+
+#[cfg(windows)]
+fn path_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+#[cfg(not(windows))]
+fn path_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_owned()
+}
+
+fn explorer_action_requires_focus(action: &ExplorerAction) -> bool {
+    !matches!(action, ExplorerAction::Copy)
+}
+
+pub fn prepare_explorer_activation(activation: ExplorerActivation) -> ExplorerActivation {
+    match activation {
+        ExplorerActivation::Request(request) => {
+            let id = request.id.clone();
+            match prepare_request_with_clipboard(request, &NativeFileDropClipboard) {
+                Ok(request) => ExplorerActivation::Request(request),
+                Err(error) => ExplorerActivation::Error(ExplorerErrorPayload {
+                    id,
+                    message: error.to_string(),
+                }),
+            }
+        }
+        other => other,
+    }
+}
+
+#[cfg(windows)]
+mod native_file_drop {
+    use super::build_file_drop_payload;
+    use std::ffi::{c_void, OsString};
+    use std::io;
+    use std::os::windows::ffi::OsStringExt;
+    use std::path::{Path, PathBuf};
+    use std::ptr;
+    use std::time::Duration;
+
+    type Handle = *mut c_void;
+    const CF_HDROP: u32 = 15;
+    const GMEM_MOVEABLE: u32 = 0x0002;
+    const GMEM_ZEROINIT: u32 = 0x0040;
+    const DRAG_QUERY_FILE_COUNT: u32 = 0xFFFF_FFFF;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn OpenClipboard(owner: Handle) -> i32;
+        fn CloseClipboard() -> i32;
+        fn EmptyClipboard() -> i32;
+        fn SetClipboardData(format: u32, memory: Handle) -> Handle;
+        fn GetClipboardData(format: u32) -> Handle;
+        fn IsClipboardFormatAvailable(format: u32) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalAlloc(flags: u32, bytes: usize) -> Handle;
+        fn GlobalLock(memory: Handle) -> *mut c_void;
+        fn GlobalUnlock(memory: Handle) -> i32;
+        fn GlobalFree(memory: Handle) -> Handle;
+    }
+
+    #[link(name = "shell32")]
+    unsafe extern "system" {
+        fn DragQueryFileW(
+            drop_handle: Handle,
+            file_index: u32,
+            file_name: *mut u16,
+            file_name_size: u32,
+        ) -> u32;
+    }
+
+    struct ClipboardGuard;
+
+    impl ClipboardGuard {
+        fn open() -> io::Result<Self> {
+            for _ in 0..10 {
+                if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+                    return Ok(Self);
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(io::Error::last_os_error())
+        }
+    }
+
+    impl Drop for ClipboardGuard {
+        fn drop(&mut self) {
+            unsafe {
+                CloseClipboard();
+            }
+        }
+    }
+
+    struct GlobalMemory(Handle);
+
+    impl Drop for GlobalMemory {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    GlobalFree(self.0);
+                }
+            }
+        }
+    }
+
+    pub fn write_paths(paths: &[PathBuf]) -> io::Result<()> {
+        let path_refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+        let payload = build_file_drop_payload(&path_refs)?;
+        let _clipboard = ClipboardGuard::open()?;
+        if unsafe { EmptyClipboard() } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let memory = GlobalMemory(unsafe {
+            GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, payload.len())
+        });
+        if memory.0.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let target = unsafe { GlobalLock(memory.0) };
+        if target.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(payload.as_ptr(), target.cast::<u8>(), payload.len());
+            GlobalUnlock(memory.0);
+        }
+
+        if unsafe { SetClipboardData(CF_HDROP, memory.0) }.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        std::mem::forget(memory);
+        Ok(())
+    }
+
+    pub fn read_paths() -> io::Result<Vec<PathBuf>> {
+        let _clipboard = ClipboardGuard::open()?;
+        if unsafe { IsClipboardFormatAvailable(CF_HDROP) } == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "clipboard does not contain Windows File Drop data",
+            ));
+        }
+        let handle = unsafe { GetClipboardData(CF_HDROP) };
+        if handle.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let count = unsafe {
+            DragQueryFileW(handle, DRAG_QUERY_FILE_COUNT, ptr::null_mut(), 0)
+        };
+        let mut paths = Vec::with_capacity(count as usize);
+        for index in 0..count {
+            let length = unsafe { DragQueryFileW(handle, index, ptr::null_mut(), 0) };
+            let mut buffer = vec![0u16; length as usize + 1];
+            let written = unsafe {
+                DragQueryFileW(handle, index, buffer.as_mut_ptr(), buffer.len() as u32)
+            };
+            if written == 0 && length != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            buffer.truncate(written as usize);
+            paths.push(PathBuf::from(OsString::from_wide(&buffer)));
+        }
+        Ok(paths)
+    }
+}
+
+#[cfg(not(windows))]
+mod native_file_drop {
+    use std::io;
+    use std::path::PathBuf;
+
+    pub fn write_paths(_paths: &[PathBuf]) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Windows File Drop clipboard is only available on Windows",
+        ))
+    }
+
+    pub fn read_paths() -> io::Result<Vec<PathBuf>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Windows File Drop clipboard is only available on Windows",
+        ))
+    }
+}
+
 pub fn parse_explorer_request<I>(args: I) -> Result<ExplorerRequest, ExplorerRequestError>
 where
     I: IntoIterator<Item = OsString>,
@@ -892,6 +1412,8 @@ where
         id: uuid::Uuid::new_v4().to_string(),
         action,
         paths,
+        source_selection: None,
+        destination_path: None,
     })
 }
 
@@ -919,11 +1441,25 @@ where
 #[cfg(windows)]
 pub fn handle_secondary_instance(app: &AppHandle, args: Vec<String>) {
     let activation = parse_explorer_activation(args.into_iter().map(OsString::from));
+    let activation = match activation {
+        ExplorerActivation::Request(request) => ExplorerActivation::Request(
+            app.state::<ExplorerCopyAggregationState>().merge(request),
+        ),
+        other => other,
+    };
+    let activation = prepare_explorer_activation(activation);
     if matches!(activation, ExplorerActivation::None) {
         return;
     }
 
-    focus_main_window(app);
+    let requires_focus = match &activation {
+        ExplorerActivation::Request(request) => explorer_action_requires_focus(&request.action),
+        ExplorerActivation::Error(_) => true,
+        ExplorerActivation::None => false,
+    };
+    if requires_focus {
+        focus_main_window(app);
+    }
     let state = app.state::<ExplorerPendingState>();
     let events = state.enqueue(activation);
     if let Err(error) = emit_events(app, &state, events) {
@@ -989,6 +1525,10 @@ fn parse_action(value: &OsStr) -> Result<ExplorerAction, ExplorerRequestError> {
         Ok(ExplorerAction::SetSource)
     } else if value == OsStr::new("set-destination") {
         Ok(ExplorerAction::SetDestination)
+    } else if value == OsStr::new("copy") {
+        Ok(ExplorerAction::Copy)
+    } else if value == OsStr::new("paste") {
+        Ok(ExplorerAction::Paste)
     } else {
         Err(ExplorerRequestError::new("Unknown Explorer action"))
     }
@@ -1000,9 +1540,14 @@ fn validate_paths(action: &ExplorerAction, paths: &[PathBuf]) -> Result<(), Expl
             "Explorer request requires at least one path",
         ));
     }
-    if matches!(action, ExplorerAction::SetDestination) && paths.len() != 1 {
+    if matches!(
+        action,
+        ExplorerAction::SetDestination | ExplorerAction::Paste
+    ) && paths.len()
+        != 1
+    {
         return Err(ExplorerRequestError::new(
-            "Explorer destination requires exactly one path",
+            "Explorer destination or paste action requires exactly one path",
         ));
     }
 
@@ -1021,7 +1566,11 @@ fn validate_paths(action: &ExplorerAction, paths: &[PathBuf]) -> Result<(), Expl
             }
         })?;
         reject_filesystem_links(path)?;
-        if matches!(action, ExplorerAction::SetDestination) && !metadata.is_dir() {
+        if matches!(
+            action,
+            ExplorerAction::SetDestination | ExplorerAction::Paste
+        ) && !metadata.is_dir()
+        {
             return Err(ExplorerRequestError::new(
                 "Explorer destination path must be a directory",
             ));
@@ -1149,10 +1698,13 @@ impl Drop for TestRegistryNamespace {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_registry_command, explorer_verbs, install_with_registry,
-        integration_status_with_registry, parse_explorer_activation, parse_explorer_request,
-        uninstall_with_registry, ExplorerAction, ExplorerActivation, ExplorerEvent,
-        ExplorerPendingState, MemoryRegistry, RegistryAccess, RegistryScope, TestRegistryNamespace,
+        build_file_drop_payload, build_registry_command, explorer_action_requires_focus,
+        explorer_verbs, install_with_registry, integration_status_with_registry,
+        parse_explorer_activation, parse_explorer_request, prepare_request_with_clipboard,
+        uninstall_with_registry, validate_paste_destination_with_probe, ExplorerAction,
+        ExplorerActivation, ExplorerEvent, ExplorerPendingState, MemoryFileDropClipboard,
+        MemoryRegistry, RegistryAccess, RegistryScope, ExplorerCopyAggregationState,
+        TestRegistryNamespace,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -1197,6 +1749,143 @@ mod tests {
     }
 
     #[test]
+    fn parses_copy_and_paste_actions() {
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("A001.mov");
+        fs::write(&file, b"clip").unwrap();
+
+        let copy = parse_explorer_request(explorer_args("copy", &[&file])).unwrap();
+        let paste = parse_explorer_request(explorer_args("paste", &[temp.path()])).unwrap();
+
+        assert_eq!(copy.action, ExplorerAction::Copy);
+        assert_eq!(paste.action, ExplorerAction::Paste);
+    }
+
+    #[test]
+    fn copy_preparation_deduplicates_paths_and_writes_file_drop_without_a_selection_payload() {
+        let temp = tempdir().unwrap();
+        let file = temp.path().join("A001.mov");
+        fs::write(&file, b"clip").unwrap();
+        let clipboard = MemoryFileDropClipboard::default();
+        let request = parse_explorer_request(explorer_args("copy", &[&file, &file])).unwrap();
+
+        let prepared = prepare_request_with_clipboard(request, &clipboard).unwrap();
+
+        assert_eq!(prepared.action, ExplorerAction::Copy);
+        assert_eq!(prepared.paths, vec![file.clone()]);
+        assert!(prepared.source_selection.is_none());
+        assert_eq!(clipboard.paths(), vec![file]);
+    }
+
+    #[test]
+    fn paste_preparation_reads_file_drop_prunes_nested_paths_and_sets_destination() {
+        let source = tempdir().unwrap();
+        let destination = tempdir().unwrap();
+        let folder = source.path().join("CARD_A");
+        let nested = folder.join("DCIM").join("A001.mov");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, b"clip").unwrap();
+        let clipboard = MemoryFileDropClipboard::with_paths(vec![folder.clone(), nested]);
+        let request =
+            parse_explorer_request(explorer_args("paste", &[destination.path()])).unwrap();
+
+        let prepared = prepare_request_with_clipboard(request, &clipboard).unwrap();
+
+        assert_eq!(prepared.action, ExplorerAction::Paste);
+        assert_eq!(prepared.destination_path.as_deref(), Some(destination.path()));
+        let selection = prepared.source_selection.unwrap();
+        assert_eq!(selection.common_root(), source.path());
+        assert_eq!(selection.selected_paths(), &[folder]);
+    }
+
+    #[test]
+    fn paste_preparation_rejects_empty_file_drop_without_producing_a_request() {
+        let destination = tempdir().unwrap();
+        let clipboard = MemoryFileDropClipboard::default();
+        let request =
+            parse_explorer_request(explorer_args("paste", &[destination.path()])).unwrap();
+
+        let error = prepare_request_with_clipboard(request, &clipboard).unwrap_err();
+
+        assert!(error.to_string().contains("empty") || error.to_string().contains("File Drop"));
+    }
+
+    #[test]
+    fn paste_destination_rejects_overlap_and_a_failed_write_probe() {
+        let source = tempdir().unwrap();
+        let selected = source.path().join("CARD_A");
+        let nested_destination = selected.join("backup");
+        fs::create_dir_all(&nested_destination).unwrap();
+        let selection = crate::source_selection::SourceSelection::new(
+            source.path().to_path_buf(),
+            vec![selected],
+        )
+        .unwrap();
+
+        let overlap = validate_paste_destination_with_probe(
+            &selection,
+            &nested_destination,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        let destination = tempdir().unwrap();
+        let unwritable = validate_paste_destination_with_probe(
+            &selection,
+            destination.path(),
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "simulated read-only destination",
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert!(overlap.to_string().contains("overlap"));
+        assert!(unwritable.to_string().contains("writable"));
+    }
+
+    #[test]
+    fn file_drop_payload_is_utf16_double_nul_terminated() {
+        let paths = [Path::new(r"C:\Footage Việt\A001.mov")];
+        let payload = build_file_drop_payload(&paths).unwrap();
+
+        assert_eq!(u32::from_le_bytes(payload[0..4].try_into().unwrap()), 20);
+        assert_eq!(i32::from_le_bytes(payload[16..20].try_into().unwrap()), 1);
+        assert_eq!(&payload[payload.len() - 4..], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn copy_is_the_only_valid_action_that_does_not_require_window_focus() {
+        assert!(!explorer_action_requires_focus(&ExplorerAction::Copy));
+        assert!(explorer_action_requires_focus(&ExplorerAction::Paste));
+        assert!(explorer_action_requires_focus(&ExplorerAction::SetSource));
+        assert!(explorer_action_requires_focus(&ExplorerAction::SetDestination));
+    }
+
+    #[test]
+    fn rapid_copy_invocations_aggregate_and_later_copy_starts_a_new_selection() {
+        let temp = tempdir().unwrap();
+        let first_path = temp.path().join("A001.mov");
+        let second_path = temp.path().join("A002.mov");
+        fs::write(&first_path, b"one").unwrap();
+        fs::write(&second_path, b"two").unwrap();
+        let first = parse_explorer_request(explorer_args("copy", &[&first_path])).unwrap();
+        let second = parse_explorer_request(explorer_args("copy", &[&second_path])).unwrap();
+        let later = parse_explorer_request(explorer_args("copy", &[&second_path])).unwrap();
+        let state = ExplorerCopyAggregationState::default();
+        let started = std::time::Instant::now();
+
+        let first = state.merge_at(first, started);
+        let combined = state.merge_at(second, started + std::time::Duration::from_millis(50));
+        let reset = state.merge_at(later, started + std::time::Duration::from_secs(1));
+
+        assert_eq!(first.paths, vec![first_path.clone()]);
+        assert_eq!(combined.paths, vec![first_path, second_path.clone()]);
+        assert_eq!(reset.paths, vec![second_path]);
+    }
+
+    #[test]
     fn rejects_missing_path_argument() {
         let args = vec![
             OsString::from("OffloadKit.exe"),
@@ -1213,7 +1902,7 @@ mod tests {
     fn rejects_unknown_action() {
         let temp = tempdir().unwrap();
 
-        let error = parse_explorer_request(explorer_args("copy", &[temp.path()])).unwrap_err();
+        let error = parse_explorer_request(explorer_args("launch", &[temp.path()])).unwrap_err();
 
         assert!(error.to_string().contains("action"));
     }
@@ -1384,6 +2073,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn registry_defines_copy_for_files_and_folders_and_paste_for_folder_targets() {
+        let keys: Vec<&str> = explorer_verbs().iter().map(|verb| verb.key).collect();
+
+        assert_eq!(keys.len(), 9);
+        assert!(keys.contains(&r"Software\Classes\*\shell\OffloadKit.Copy"));
+        assert!(keys.contains(&r"Software\Classes\Directory\shell\OffloadKit.Copy"));
+        assert!(keys.contains(&r"Software\Classes\Directory\shell\OffloadKit.Paste"));
+        assert!(keys.contains(
+            &r"Software\Classes\Directory\Background\shell\OffloadKit.Paste"
+        ));
+    }
+
     #[cfg(windows)]
     #[test]
     fn registry_install_writes_all_verbs_and_reads_back_healthy() {
@@ -1398,7 +2100,7 @@ mod tests {
 
         assert!(installed.installed);
         assert!(status.healthy);
-        assert_eq!(status.matching_commands, 5);
+        assert_eq!(status.matching_commands, 9);
         for verb in explorer_verbs() {
             let command_key = namespace.scope.qualify(&format!("{}\\command", verb.key));
             let command = namespace.registry.get_string(&command_key, None).unwrap();
@@ -1426,7 +2128,7 @@ mod tests {
 
         assert!(!status.installed);
         assert!(!status.healthy);
-        assert_eq!(status.matching_commands, 4);
+        assert_eq!(status.matching_commands, 8);
     }
 
     #[test]
