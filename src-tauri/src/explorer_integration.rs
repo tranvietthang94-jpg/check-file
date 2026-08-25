@@ -1368,7 +1368,10 @@ where
 
     while index < remaining.len() {
         match remaining[index].as_os_str() {
-            value if value == OsStr::new("--explorer-action") => {
+            value
+                if value == OsStr::new("--explorer-action")
+                    || value == OsStr::new("--finder-action") =>
+            {
                 if action.is_some() {
                     return Err(ExplorerRequestError::new(
                         "Explorer action may only be specified once",
@@ -1421,9 +1424,11 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let args: Vec<OsString> = args.into_iter().collect();
-    let is_explorer_invocation = args
-        .iter()
-        .any(|arg| arg == OsStr::new("--explorer-action") || arg == OsStr::new("--path"));
+    let is_explorer_invocation = args.iter().any(|arg| {
+        arg == OsStr::new("--explorer-action")
+            || arg == OsStr::new("--finder-action")
+            || arg == OsStr::new("--path")
+    });
     if !is_explorer_invocation {
         return ExplorerActivation::None;
     }
@@ -1720,6 +1725,66 @@ mod tests {
             args.push(path.as_os_str().to_owned());
         }
         args
+    }
+
+    fn finder_args(action: &str, paths: &[&Path]) -> Vec<OsString> {
+        let mut args = vec![
+            OsString::from("offloadkit"),
+            OsString::from("--finder-action"),
+            OsString::from(action),
+        ];
+        for path in paths {
+            args.push(OsString::from("--path"));
+            args.push(path.as_os_str().to_owned());
+        }
+        args
+    }
+
+    #[test]
+    fn finder_actions_use_the_shared_request_model_and_preserve_unicode_paths() {
+        let source = tempdir().unwrap();
+        let destination = tempdir().unwrap();
+        let selected = source.path().join("Thẻ nhớ A Việt Nam");
+        fs::create_dir(&selected).unwrap();
+
+        let cases = [
+            ("set-source", ExplorerAction::SetSource, selected.as_path()),
+            (
+                "set-destination",
+                ExplorerAction::SetDestination,
+                destination.path(),
+            ),
+            ("copy", ExplorerAction::Copy, selected.as_path()),
+            ("paste", ExplorerAction::Paste, destination.path()),
+        ];
+
+        let state = ExplorerPendingState::default();
+        state.mark_frontend_ready();
+        for (action, expected, path) in cases {
+            let activation = parse_explorer_activation(finder_args(action, &[path]));
+            let request = match &activation {
+                ExplorerActivation::Request(request) => request,
+                other => panic!("expected Finder request, got {other:?}"),
+            };
+            assert_eq!(request.action, expected);
+            assert_eq!(request.paths, vec![path.to_path_buf()]);
+            assert_eq!(state.enqueue(activation).len(), 1);
+        }
+    }
+
+    #[test]
+    fn finder_action_rejects_missing_path_and_malformed_action() {
+        let missing = parse_explorer_request([
+            OsString::from("offloadkit"),
+            OsString::from("--finder-action"),
+            OsString::from("set-source"),
+        ])
+        .unwrap_err();
+        let temp = tempdir().unwrap();
+        let malformed = parse_explorer_request(finder_args("launch", &[temp.path()])).unwrap_err();
+
+        assert!(missing.to_string().contains("path"));
+        assert!(malformed.to_string().contains("action"));
     }
 
     #[test]
