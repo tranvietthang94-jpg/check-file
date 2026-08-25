@@ -581,6 +581,10 @@ fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
 /// Outcome of copying a single file.
 enum CopyFileOutcome {
     Cancelled,
@@ -750,13 +754,19 @@ fn run_copy_core_inner(
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> CopyOutcome {
-    let source_root = fs::canonicalize(source);
     let destination_root = fs::canonicalize(destination);
-    if let (Ok(source_root), Ok(destination_root)) = (&source_root, &destination_root) {
-        if source_root == destination_root
-            || source_root.starts_with(destination_root)
-            || destination_root.starts_with(source_root)
-        {
+    if let Ok(destination_root) = &destination_root {
+        let overlaps = match selection {
+            Some(selection) => selection.selected_paths().iter().any(|selected| {
+                fs::canonicalize(selected)
+                    .map(|selected| paths_overlap(&selected, destination_root))
+                    .unwrap_or(false)
+            }),
+            None => fs::canonicalize(source)
+                .map(|source_root| paths_overlap(&source_root, destination_root))
+                .unwrap_or(false),
+        };
+        if overlaps {
             return CopyOutcome {
                 cancelled: false,
                 files_copied: 0,
@@ -1675,6 +1685,40 @@ mod tests {
             .join("nested")
             .is_dir());
         assert!(!dst_dir.path().join("unselected").exists());
+    }
+
+    #[test]
+    fn selected_copy_allows_a_destination_sibling_inside_the_common_root() {
+        let root = tempfile::tempdir().unwrap();
+        let selected = root.path().join("CARD_A");
+        let destination = root.path().join("BACKUP");
+        fs::create_dir_all(&selected).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(selected.join("clip.mov"), b"footage").unwrap();
+        let selection = SourceSelection::new(
+            root.path().to_path_buf(),
+            vec![selected.clone()],
+        )
+        .unwrap();
+
+        let outcome = run_copy_core_with_selection(
+            &NoopSink,
+            "selected-sibling-destination".to_string(),
+            &selection,
+            &destination,
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Selection",
+            &OrganizeSettings::default(),
+            false,
+            false,
+            None,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(fs::read(destination.join("CARD_A").join("clip.mov")).unwrap(), b"footage");
+        assert!(selected.join("clip.mov").exists());
     }
 
     #[test]

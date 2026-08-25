@@ -457,10 +457,18 @@ function App() {
     if (missingDestination) {
       throw new Error(`Đích “${endpointLabel(missingDestination, disks)}” chưa có đường dẫn thư mục.`);
     }
-    const sourceRoot = source.path.replace(/[\\/]+$/, "").toLowerCase();
+    const normalizeTransferPath = (path: string) =>
+      path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const sourceRoots = (source.selectedPaths?.length ? source.selectedPaths : [source.path])
+      .map(normalizeTransferPath);
     if (destinationEndpoints.some((destination) => {
-      const destinationRoot = destination.path.replace(/[\\/]+$/, "").toLowerCase();
-      return destinationRoot === sourceRoot || destinationRoot.startsWith(`${sourceRoot}/`) || sourceRoot.startsWith(`${destinationRoot}/`);
+      const destinationRoot = normalizeTransferPath(destination.path);
+      return sourceRoots.some(
+        (sourceRoot) =>
+          destinationRoot === sourceRoot ||
+          destinationRoot.startsWith(`${sourceRoot}/`) ||
+          sourceRoot.startsWith(`${destinationRoot}/`),
+      );
     })) {
       throw new Error(`Nguồn “${endpointLabel(source, disks)}” và một Đích đang trùng hoặc chồng lấn đường dẫn.`);
     }
