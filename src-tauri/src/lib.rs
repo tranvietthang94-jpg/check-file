@@ -7,6 +7,7 @@ mod dedup;
 mod disks;
 mod eject;
 pub mod explorer_integration;
+pub mod finder_integration;
 mod media_scan;
 mod metadata;
 mod mhl;
