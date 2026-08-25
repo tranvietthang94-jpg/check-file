@@ -1,7 +1,11 @@
 import { create } from "zustand";
-import { acknowledgeExplorerRequest } from "../lib/tauri";
+import { acknowledgeExplorerRequest, startTransferGroup } from "../lib/tauri";
 import type { ExplorerErrorPayload, ExplorerRequest } from "../lib/tauri";
 import { useDisksStore } from "./disksStore";
+import { useGroupsStore } from "./groupsStore";
+import { useOrganizeStore } from "./organizeStore";
+import { useSettingsStore } from "./settingsStore";
+import { pathLabel } from "../lib/format";
 
 interface ExplorerFeedback {
   kind: "success" | "error";
@@ -71,16 +75,13 @@ async function drainQueue(): Promise<void> {
     if (!request) return;
 
     try {
-      applyRequest(request);
+      const message = await applyRequest(request);
       useExplorerActionStore.setState((state) => ({
         pending: state.pending.filter((pending) => pending.id !== request.id),
         processedIds: [...state.processedIds, request.id],
         feedback: {
           kind: "success",
-          message:
-            request.action === "setSource"
-              ? `Đã đặt Source từ Windows Explorer: ${request.paths.join(", ")}`
-              : `Đã đặt Destination từ Windows Explorer: ${request.paths[0]}`,
+          message,
         },
       }));
       await acknowledgeExplorerRequest(request.id);
@@ -94,18 +95,26 @@ async function drainQueue(): Promise<void> {
   }
 }
 
-function applyRequest(request: ExplorerRequest): void {
+async function applyRequest(request: ExplorerRequest): Promise<string> {
   if (request.paths.length === 0 || request.paths.some((path) => path.trim() === "")) {
     throw new Error("Yêu cầu Windows Explorer không có đường dẫn hợp lệ.");
   }
 
   const disks = useDisksStore.getState();
   if (request.action === "setSource") {
+    if (request.sourceSelection) {
+      const result = disks.addSourceSelection(
+        request.sourceSelection.commonRoot,
+        request.sourceSelection.selectedPaths,
+      );
+      if (!result.ok) throw new Error(result.error);
+      return `Đã đặt Source từ Windows Explorer: ${request.sourceSelection.selectedPaths.join(", ")}`;
+    }
     for (const path of request.paths) {
       const result = disks.addSourcePath(path);
       if (!result.ok) throw new Error(result.error);
     }
-    return;
+    return `Đã đặt Source từ Windows Explorer: ${request.paths.join(", ")}`;
   }
 
   if (request.action === "setDestination") {
@@ -114,7 +123,62 @@ function applyRequest(request: ExplorerRequest): void {
     }
     const result = disks.addDestinationPath(request.paths[0]);
     if (!result.ok) throw new Error(result.error);
-    return;
+    return `Đã đặt Destination từ Windows Explorer: ${request.paths[0]}`;
+  }
+
+  if (request.action === "copy") {
+    return `Đã copy ${request.paths.length} mục vào Windows Clipboard.`;
+  }
+
+  if (request.action === "paste") {
+    const selection = request.sourceSelection;
+    const destinationPath = request.destinationPath;
+    if (!selection || !destinationPath) {
+      throw new Error("Yêu cầu Paste từ Windows Explorer thiếu Source selection hoặc Destination.");
+    }
+    const endpoints = disks.replaceForExplorerPaste(
+      selection.commonRoot,
+      selection.selectedPaths,
+      destinationPath,
+    );
+    const settings = useSettingsStore.getState();
+    const organizeState = useOrganizeStore.getState();
+    const organize = {
+      renameTemplate: organizeState.renameTemplate,
+      folderTemplate: organizeState.folderTemplate,
+      counterPadding: organizeState.counterPadding,
+      selectiveCopy: organizeState.selectiveCopy,
+      bundleIgnore: organizeState.bundleIgnore,
+      ignoreEmptyFolders: organizeState.ignoreEmptyFolders,
+      flatten: organizeState.flatten,
+      contentDateExcludedExtensions: organizeState.contentDateExcludedExtensions,
+      dateOverride: organizeState.dateOverride,
+      elements: organizeState.elements,
+      autoLabel: organizeState.autoLabel,
+      skipModificationDateCheck: organizeState.skipModificationDateCheck,
+      autoContinueOnBrokenMedia: organizeState.autoContinueOnBrokenMedia,
+    };
+    const sourceLabel = endpoints.source.label || pathLabel(endpoints.source.path);
+    const destinationLabel = endpoints.destination.label || pathLabel(endpoints.destination.path);
+    const groupId = await startTransferGroup(
+      endpoints.source.path,
+      endpoints.source.selectedPaths ?? null,
+      [endpoints.destination.path],
+      "parallel",
+      settings.verificationMode,
+      settings.checksumAlgorithm,
+      sourceLabel,
+      organize,
+      false,
+      false,
+      settings.legacyChecksumEnabled ? settings.legacyChecksumAlgorithm : null,
+      settings.saveLogToDestination,
+      settings.createPerFileMhl,
+    );
+    useGroupsStore
+      .getState()
+      .setGroupMeta(groupId, "parallel", sourceLabel, [destinationLabel]);
+    return `Đã bắt đầu Paste bằng OffloadKit: ${selection.selectedPaths.length} mục.`;
   }
 
   throw new Error("Hành động Windows Explorer không hợp lệ.");

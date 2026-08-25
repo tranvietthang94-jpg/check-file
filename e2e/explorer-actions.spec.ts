@@ -175,4 +175,136 @@ test.describe("Explorer frontend event bridge", () => {
 
     await expect(page.getByTestId("source-endpoint-card")).toContainText("F:\\Startup Source");
   });
+
+  test("Copy action acknowledges without mutating composer or transfer state", async ({ page }) => {
+    const before = await page.evaluate(async () => {
+      const { useDisksStore } = await import("/src/state/disksStore.ts");
+      const store = useDisksStore.getState();
+      store.addSourcePath("F:\\Existing Source");
+      store.addDestinationPath("F:\\Existing Destination");
+      return {
+        sources: useDisksStore.getState().sources,
+        destinations: useDisksStore.getState().destinations,
+      };
+    });
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-request", {
+          detail: {
+            id: "copy-request-1",
+            action: "copy",
+            paths: ["F:\\Footage\\A001.mov", "F:\\Footage\\CARD_B"],
+          },
+        }),
+      );
+    });
+
+    await expect.poll(() => page.evaluate(() =>
+      (window as Window & { __OFFLOADKIT_TEST_ACKS__?: string[] }).__OFFLOADKIT_TEST_ACKS__,
+    )).toEqual(["copy-request-1"]);
+    const after = await page.evaluate(async () => {
+      const { useDisksStore } = await import("/src/state/disksStore.ts");
+      const { useTransfersStore } = await import("/src/state/transfersStore.ts");
+      return {
+        sources: useDisksStore.getState().sources,
+        destinations: useDisksStore.getState().destinations,
+        jobCount: Object.keys(useTransfersStore.getState().jobs).length,
+      };
+    });
+    expect(after.sources).toEqual(before.sources);
+    expect(after.destinations).toEqual(before.destinations);
+    expect(after.jobCount).toBe(0);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("Paste resets composer and starts one safe selected-path copy with current settings", async ({ page }) => {
+    await page.evaluate(async () => {
+      const { useDisksStore } = await import("/src/state/disksStore.ts");
+      const { useSettingsStore } = await import("/src/state/settingsStore.ts");
+      const { useOrganizeStore } = await import("/src/state/organizeStore.ts");
+      useDisksStore.getState().addSourcePath("F:\\Old Source");
+      useDisksStore.getState().addDestinationPath("F:\\Old Destination");
+      useSettingsStore.setState({
+        verificationMode: "source",
+        checksumAlgorithm: "md5",
+        moveSameVolume: true,
+        legacyChecksumEnabled: true,
+        legacyChecksumAlgorithm: "sha1",
+        saveLogToDestination: false,
+        createPerFileMhl: true,
+      });
+      useOrganizeStore.setState({ flatten: true, skipModificationDateCheck: true });
+      const testWindow = window as Window & {
+        __OFFLOADKIT_TEST_START_TRANSFER__?: (payload: unknown) => string;
+        __OFFLOADKIT_TEST_STARTS__?: unknown[];
+      };
+      testWindow.__OFFLOADKIT_TEST_STARTS__ = [];
+      testWindow.__OFFLOADKIT_TEST_START_TRANSFER__ = (payload) => {
+        testWindow.__OFFLOADKIT_TEST_STARTS__?.push(payload);
+        return "paste-group-1";
+      };
+    });
+
+    await page.evaluate(() => {
+      window.dispatchEvent(
+        new CustomEvent("offloadkit-test:explorer-request", {
+          detail: {
+            id: "paste-request-1",
+            action: "paste",
+            paths: ["F:\\BACKUP HXM"],
+            sourceSelection: {
+              commonRoot: "F:\\Footage",
+              selectedPaths: ["F:\\Footage\\CARD_A", "F:\\Footage\\A001.wav"],
+            },
+            destinationPath: "F:\\BACKUP HXM",
+          },
+        }),
+      );
+    });
+
+    await expect.poll(() => page.evaluate(() =>
+      (window as Window & { __OFFLOADKIT_TEST_ACKS__?: string[] }).__OFFLOADKIT_TEST_ACKS__,
+    )).toEqual(["paste-request-1"]);
+    const state = await page.evaluate(async () => {
+      const { useDisksStore } = await import("/src/state/disksStore.ts");
+      const { useGroupsStore } = await import("/src/state/groupsStore.ts");
+      return {
+        sources: useDisksStore.getState().sources,
+        destinations: useDisksStore.getState().destinations,
+        group: useGroupsStore.getState().groups["paste-group-1"],
+        starts: (window as Window & { __OFFLOADKIT_TEST_STARTS__?: unknown[] })
+          .__OFFLOADKIT_TEST_STARTS__,
+      };
+    });
+
+    expect(state.sources).toHaveLength(1);
+    expect(state.sources[0]).toMatchObject({
+      path: "F:\\Footage",
+      selectedPaths: ["F:\\Footage\\CARD_A", "F:\\Footage\\A001.wav"],
+    });
+    expect(state.destinations).toHaveLength(1);
+    expect(state.destinations[0]).toMatchObject({ path: "F:\\BACKUP HXM" });
+    expect(state.group).toMatchObject({
+      id: "paste-group-1",
+      mode: "parallel",
+      expectedJobCount: 1,
+    });
+    expect(state.starts).toEqual([
+      expect.objectContaining({
+        source: "F:\\Footage",
+        selectedPaths: ["F:\\Footage\\CARD_A", "F:\\Footage\\A001.wav"],
+        destinations: ["F:\\BACKUP HXM"],
+        mode: "parallel",
+        verificationMode: "source",
+        checksumAlgorithm: "md5",
+        moveAfterTransfer: false,
+        moveSameVolume: false,
+        legacyChecksumAlgorithm: "sha1",
+        saveLogToDestination: false,
+        createPerFileMhl: true,
+        organize: expect.objectContaining({ flatten: true, skipModificationDateCheck: true }),
+      }),
+    ]);
+  });
 });

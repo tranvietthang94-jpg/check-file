@@ -32,13 +32,21 @@ function diskForPath(path: string, disks: DiskInfo[]): DiskInfo | undefined {
     });
 }
 
-function pathEndpoint(path: string, disks: DiskInfo[], isAutoLabel: boolean): Endpoint {
+function pathEndpoint(
+  path: string,
+  disks: DiskInfo[],
+  isAutoLabel: boolean,
+  selectedPaths?: string[],
+): Endpoint {
   const disk = diskForPath(path, disks);
   return {
-    id: `path:${normalizeWindowsPath(path)}`,
+    id: selectedPaths
+      ? `selection:${normalizeWindowsPath(path)}:${selectedPaths.map(normalizeWindowsPath).join("|")}`
+      : `path:${normalizeWindowsPath(path)}`,
     diskId: disk?.id ?? null,
     label: "",
     path,
+    selectedPaths,
     isAutoLabel,
   };
 }
@@ -58,7 +66,13 @@ interface DisksState {
   addSource: (diskId: string) => void;
   addDestination: (diskId: string) => void;
   addSourcePath: (path: string) => AddEndpointPathResult;
+  addSourceSelection: (commonRoot: string, selectedPaths: string[]) => AddEndpointPathResult;
   addDestinationPath: (path: string) => AddEndpointPathResult;
+  replaceForExplorerPaste: (
+    commonRoot: string,
+    selectedPaths: string[],
+    destinationPath: string,
+  ) => { source: Endpoint; destination: Endpoint };
   removeSource: (endpointId: string) => void;
   removeDestination: (endpointId: string) => void;
   /** The AddTransfersBar's "clear" (✕) button -- resets both lists so the
@@ -150,6 +164,26 @@ export const useDisksStore = create<DisksState>((set, get) => ({
     return { ok: true, added: true, endpoint };
   },
 
+  addSourceSelection: (commonRoot, selectedPaths) => {
+    if (commonRoot.trim() === "" || selectedPaths.length === 0) {
+      return { ok: false, added: false, error: "Selection Source không hợp lệ." };
+    }
+    if (selectedPaths.some((path) => path.trim() === "")) {
+      return { ok: false, added: false, error: "Đường dẫn đã chọn không được để trống." };
+    }
+    const endpoint = pathEndpoint(
+      commonRoot,
+      get().disks,
+      useOrganizeStore.getState().autoLabel.enabled,
+      selectedPaths,
+    );
+    const existing = get().sources.find((source) => source.id === endpoint.id);
+    if (existing) return { ok: true, added: false, endpoint: existing };
+    set((state) => ({ sources: [...state.sources, endpoint] }));
+    get().recomputeAutoLabels();
+    return { ok: true, added: true, endpoint };
+  },
+
   addDestinationPath: (path) => {
     if (path.trim() === "") {
       return { ok: false, added: false, error: "Đường dẫn Destination không được để trống." };
@@ -163,6 +197,30 @@ export const useDisksStore = create<DisksState>((set, get) => ({
     const endpoint = pathEndpoint(path, get().disks, false);
     set((state) => ({ destinations: [...state.destinations, endpoint] }));
     return { ok: true, added: true, endpoint };
+  },
+
+  replaceForExplorerPaste: (commonRoot, selectedPaths, destinationPath) => {
+    if (
+      commonRoot.trim() === "" ||
+      destinationPath.trim() === "" ||
+      selectedPaths.length === 0 ||
+      selectedPaths.some((path) => path.trim() === "")
+    ) {
+      throw new Error("Yêu cầu Paste từ Windows Explorer không hợp lệ.");
+    }
+    const source = pathEndpoint(
+      commonRoot,
+      get().disks,
+      useOrganizeStore.getState().autoLabel.enabled,
+      selectedPaths,
+    );
+    const destination = pathEndpoint(destinationPath, get().disks, false);
+    set({ sources: [source], destinations: [destination] });
+    get().recomputeAutoLabels();
+    return {
+      source: get().sources[0],
+      destination: get().destinations[0],
+    };
   },
 
   removeSource: (endpointId) => {

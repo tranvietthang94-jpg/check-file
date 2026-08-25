@@ -19,12 +19,19 @@ import type { MhlVerifyReport, RepairPlan } from "../types/mhl";
 import type { TransferLogEntry } from "../types/transferLog";
 import type { QueueMode } from "../types/queue";
 
-export type ExplorerAction = "setSource" | "setDestination";
+export type ExplorerAction = "setSource" | "setDestination" | "copy" | "paste";
+
+export interface ExplorerSourceSelection {
+  commonRoot: string;
+  selectedPaths: string[];
+}
 
 export interface ExplorerRequest {
   id: string;
   action: ExplorerAction;
   paths: string[];
+  sourceSelection?: ExplorerSourceSelection;
+  destinationPath?: string;
 }
 
 export interface ExplorerErrorPayload {
@@ -125,7 +132,7 @@ export function startTransferGroup(
   saveLogToDestination: boolean,
   createPerFileMhl: boolean,
 ): Promise<string> {
-  return invoke<string>("start_transfer_group", {
+  const payload = {
     source,
     selectedPaths,
     destinations,
@@ -139,7 +146,14 @@ export function startTransferGroup(
     legacyChecksumAlgorithm,
     saveLogToDestination,
     createPerFileMhl,
-  });
+  };
+  if (!hasTauriRuntime()) {
+    const hook = (window as Window & {
+      __OFFLOADKIT_TEST_START_TRANSFER__?: (request: typeof payload) => string;
+    }).__OFFLOADKIT_TEST_START_TRANSFER__;
+    if (hook) return Promise.resolve(hook(payload));
+  }
+  return invoke<string>("start_transfer_group", payload);
 }
 
 export function cancelCopy(jobId: string): Promise<boolean> {
