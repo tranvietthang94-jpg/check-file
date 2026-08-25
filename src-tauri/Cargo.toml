@@ -1,6 +1,6 @@
 [package]
 name = "offloadkit"
-version = "0.1.4"
+version = "0.1.5"
 description = "Personal DIT offload/ingest tool (OffShoot-inspired)"
 authors = ["you"]
 edition = "2021"

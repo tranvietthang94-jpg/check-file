@@ -8,9 +8,9 @@ OffloadKit helps copy camera media safely from a source drive to one or more bac
 
 ## Current release
 
-**v0.1.4 — Phase 13: Windows Explorer Workflows**
+**v0.1.5 — Phase 14: macOS Finder Quick Actions**
 
-This release adds opt-in Windows Explorer actions for selecting endpoints and performing verified OffloadKit copies, plus fail-closed pathname revalidation immediately before sensitive copy mutations.
+This release adds opt-in macOS Finder Quick Actions for Source, Destination, Copy and Paste, backed by native file-URL pasteboard support and the existing fail-closed selected-copy pipeline. Windows Explorer integration remains supported.
 
 Download installers from the [Releases](https://github.com/tranvietthang94-jpg/check-file/releases) page.
 
@@ -66,20 +66,20 @@ These pathname checks and filesystem mutations are separate operating-system ope
 
 ## Verification status
 
-Latest local verification for v0.1.4:
+Latest local verification for v0.1.5:
 
 ```text
 Frontend build:                         PASS
-Playwright E2E:                         34/34 PASS
-Rust default suite:                     214 PASS, 1 ignored
-Real Windows clipboard/copy smoke:      1/1 PASS
+Playwright E2E:                         41/41 PASS
+Rust default suite:                     222 PASS, 1 ignored
+Finder renderer/install tests:          6/6 PASS
 Clippy (all targets, warnings denied):  PASS
 Rust formatting check:                  PASS
 npm audit:                              0 vulnerabilities
 Real-file repair smoke test:            PASS
 ```
 
-The real-file repair smoke test used a copy of an Adobe Premiere Pro Auto-Save project, intentionally corrupted the copy, repaired it from the Auto-Save source, verified the repaired result, checked `.ofkit-corrupt` evidence, and removed only the temporary repair folder. The separately invoked Phase 13 smoke exercised the native Windows File Drop clipboard and a real selected-path copy; it preserved both Source files, copied only the selected files, and left its printed temporary smoke tree available for inspection.
+The real-file repair smoke test used a copy of an Adobe Premiere Pro Auto-Save project, intentionally corrupted the copy, repaired it from the Auto-Save source, verified the repaired result, checked `.ofkit-corrupt` evidence, and removed only the temporary repair folder. The separately invoked Phase 13 smoke exercised the native Windows File Drop clipboard and a real selected-path copy; it preserved both Source files, copied only the selected files, and left its printed temporary smoke tree available for inspection. The build workflow now runs Finder renderer/install and native pasteboard smoke tests on separate Intel and Apple Silicon macOS runners; that remote matrix is not claimed as executed until the workflow actually runs.
 
 ## Platforms and installers
 
