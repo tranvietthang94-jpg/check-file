@@ -23,11 +23,11 @@ mod volume_rename;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let startup_activation = explorer_integration::prepare_explorer_activation(
         explorer_integration::parse_explorer_activation(std::env::args_os()),
     );
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     let startup_activation = explorer_integration::ExplorerActivation::None;
 
     let copy_aggregation =
@@ -36,7 +36,7 @@ pub fn run() {
         explorer_integration::ExplorerPendingState::new(startup_activation),
     );
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
         explorer_integration::handle_secondary_instance(app, args);
     }));

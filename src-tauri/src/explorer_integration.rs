@@ -1570,7 +1570,7 @@ where
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub fn handle_secondary_instance(app: &AppHandle, args: Vec<String>) {
     let activation = parse_explorer_activation(args.into_iter().map(OsString::from));
     let activation = match activation {
@@ -1642,7 +1642,7 @@ fn emit_events(
     Ok(())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn focus_main_window(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;

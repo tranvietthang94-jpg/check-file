@@ -96,8 +96,9 @@ async function drainQueue(): Promise<void> {
 }
 
 async function applyRequest(request: ExplorerRequest): Promise<string> {
+  const integrationSurface = isMacOs() ? "Finder" : "Windows Explorer";
   if (request.paths.length === 0 || request.paths.some((path) => path.trim() === "")) {
-    throw new Error("Yêu cầu Windows Explorer không có đường dẫn hợp lệ.");
+    throw new Error(`Yêu cầu ${integrationSurface} không có đường dẫn hợp lệ.`);
   }
 
   const disks = useDisksStore.getState();
@@ -108,33 +109,33 @@ async function applyRequest(request: ExplorerRequest): Promise<string> {
         request.sourceSelection.selectedPaths,
       );
       if (!result.ok) throw new Error(result.error);
-      return `Đã đặt Source từ Windows Explorer: ${request.sourceSelection.selectedPaths.join(", ")}`;
+      return `Đã đặt Source từ ${integrationSurface}: ${request.sourceSelection.selectedPaths.join(", ")}`;
     }
     for (const path of request.paths) {
       const result = disks.addSourcePath(path);
       if (!result.ok) throw new Error(result.error);
     }
-    return `Đã đặt Source từ Windows Explorer: ${request.paths.join(", ")}`;
+    return `Đã đặt Source từ ${integrationSurface}: ${request.paths.join(", ")}`;
   }
 
   if (request.action === "setDestination") {
     if (request.paths.length !== 1) {
-      throw new Error("Destination từ Windows Explorer phải có đúng một thư mục.");
+      throw new Error(`Destination từ ${integrationSurface} phải có đúng một thư mục.`);
     }
     const result = disks.addDestinationPath(request.paths[0]);
     if (!result.ok) throw new Error(result.error);
-    return `Đã đặt Destination từ Windows Explorer: ${request.paths[0]}`;
+    return `Đã đặt Destination từ ${integrationSurface}: ${request.paths[0]}`;
   }
 
   if (request.action === "copy") {
-    return `Đã copy ${request.paths.length} mục vào Windows Clipboard.`;
+    return `Đã copy ${request.paths.length} mục bằng ${integrationSurface}.`;
   }
 
   if (request.action === "paste") {
     const selection = request.sourceSelection;
     const destinationPath = request.destinationPath;
     if (!selection || !destinationPath) {
-      throw new Error("Yêu cầu Paste từ Windows Explorer thiếu Source selection hoặc Destination.");
+      throw new Error(`Yêu cầu Paste từ ${integrationSurface} thiếu Source selection hoặc Destination.`);
     }
     const endpoints = disks.replaceForExplorerPaste(
       selection.commonRoot,
@@ -178,8 +179,12 @@ async function applyRequest(request: ExplorerRequest): Promise<string> {
     useGroupsStore
       .getState()
       .setGroupMeta(groupId, "parallel", sourceLabel, [destinationLabel]);
-    return `Đã bắt đầu Paste bằng OffloadKit: ${selection.selectedPaths.length} mục.`;
+    return `Đã bắt đầu Paste từ ${integrationSurface} bằng OffloadKit: ${selection.selectedPaths.length} mục.`;
   }
 
-  throw new Error("Hành động Windows Explorer không hợp lệ.");
+  throw new Error(`Hành động ${integrationSurface} không hợp lệ.`);
+}
+
+function isMacOs(): boolean {
+  return /Macintosh|Mac OS X/.test(navigator.userAgent);
 }
