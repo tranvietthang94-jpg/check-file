@@ -153,7 +153,7 @@ export function startTransferGroup(
     }).__OFFLOADKIT_TEST_START_TRANSFER__;
     if (hook) return Promise.resolve(hook(payload));
   }
-  return invoke<string>("start_transfer_group", payload);
+  return invoke<string>("start_transfer_group", { request: payload });
 }
 
 export function cancelCopy(jobId: string): Promise<boolean> {

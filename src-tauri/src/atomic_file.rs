@@ -41,7 +41,11 @@ pub fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
     const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
     let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
-    let destination: Vec<u16> = destination.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     let ok = unsafe {
         MoveFileExW(
             source.as_ptr(),

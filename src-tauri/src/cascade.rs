@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use uuid::Uuid;
 
-use crate::checksum::ChecksumAlgorithm;
-use crate::copy_engine::{self, CopyOutcome, JobRegistry, VerificationMode};
-use crate::organize::OrganizeSettings;
+use crate::copy_engine::{self, CopyOutcome, JobRegistry};
 use crate::source_selection::SourceSelection;
 
 pub const GROUP_JOB_ADDED_EVENT: &str = "transfer-group-job-added";
@@ -75,23 +73,26 @@ fn selection_for_relay(
     SourceSelection::new(primary.to_path_buf(), output_paths).map(Some)
 }
 
-fn spawn_job<R: Runtime>(
-    app_handle: &AppHandle<R>,
-    group_id: &str,
+struct SpawnJobRequest {
     source: PathBuf,
     source_selection: Option<SourceSelection>,
     destination: PathBuf,
     hop: u8,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-    source_name: String,
-    organize: OrganizeSettings,
-    move_after_transfer: bool,
-    move_same_volume: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
-    save_log_to_destination: bool,
-    create_per_file_mhl: bool,
+    options: copy_engine::TransferOptions,
+}
+
+fn spawn_job<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    group_id: &str,
+    request: SpawnJobRequest,
 ) -> String {
+    let SpawnJobRequest {
+        source,
+        source_selection,
+        destination,
+        hop,
+        options,
+    } = request;
     let job_id = Uuid::new_v4().to_string();
     let cancel_flag = app_handle.state::<JobRegistry>().register(job_id.clone());
 
@@ -118,9 +119,11 @@ fn spawn_job<R: Runtime>(
     let job_id_thread = job_id.clone();
     let group_id_thread = group_id.to_string();
     std::thread::spawn(move || {
-        let admitted = app_handle_thread
-            .state::<JobRegistry>()
-            .wait_for_turn(&job_id_thread, &group_id_thread, &cancel_flag);
+        let admitted = app_handle_thread.state::<JobRegistry>().wait_for_turn(
+            &job_id_thread,
+            &group_id_thread,
+            &cancel_flag,
+        );
         if !admitted {
             let _ = app_handle_thread.emit(
                 copy_engine::CANCELLED_EVENT,
@@ -128,26 +131,22 @@ fn spawn_job<R: Runtime>(
                     job_id: job_id_thread.clone(),
                 },
             );
-            app_handle_thread.state::<JobRegistry>().remove(&job_id_thread);
+            app_handle_thread
+                .state::<JobRegistry>()
+                .remove(&job_id_thread);
             return;
         }
 
         copy_engine::run_copy_job(
             app_handle_thread,
-            job_id_thread,
-            source,
-            source_selection,
-            destination,
-            cancel_flag,
-            verification_mode,
-            checksum_algorithm,
-            source_name,
-            organize,
-            move_after_transfer,
-            move_same_volume,
-            legacy_checksum_algorithm,
-            save_log_to_destination,
-            create_per_file_mhl,
+            copy_engine::CopyJobRequest {
+                job_id: job_id_thread,
+                source,
+                source_selection,
+                destination,
+                cancel_flag,
+                options,
+            },
         );
     });
 
@@ -158,22 +157,25 @@ fn spawn_job<R: Runtime>(
 /// a group id; individual jobs (including cascade hop 2, which doesn't exist
 /// yet when this returns) announce themselves via `GROUP_JOB_ADDED_EVENT` so
 /// the frontend can start tracking each one as it's created.
+pub struct TransferGroupRequest {
+    pub source: PathBuf,
+    pub source_selection: Option<SourceSelection>,
+    pub destinations: Vec<PathBuf>,
+    pub mode: TransferGroupMode,
+    pub options: copy_engine::TransferOptions,
+}
+
 pub fn start_transfer_group<R: Runtime>(
     app_handle: AppHandle<R>,
-    source: PathBuf,
-    source_selection: Option<SourceSelection>,
-    destinations: Vec<PathBuf>,
-    mode: TransferGroupMode,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-    source_name: String,
-    organize: OrganizeSettings,
-    move_after_transfer: bool,
-    move_same_volume: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
-    save_log_to_destination: bool,
-    create_per_file_mhl: bool,
+    request: TransferGroupRequest,
 ) -> String {
+    let TransferGroupRequest {
+        source,
+        source_selection,
+        destinations,
+        mode,
+        options,
+    } = request;
     let group_id = Uuid::new_v4().to_string();
 
     match mode {
@@ -185,25 +187,22 @@ pub fn start_transfer_group<R: Runtime>(
             // source just as surely) only ever applies to the unambiguous
             // single-destination case.
             let single_destination = destinations.len() == 1;
-            let effective_move = move_after_transfer && single_destination;
-            let effective_same_volume_move = move_same_volume && single_destination;
+            let effective_move = options.move_after_transfer && single_destination;
+            let effective_same_volume_move = options.move_same_volume && single_destination;
             for destination in destinations {
+                let mut job_options = options.clone();
+                job_options.move_after_transfer = effective_move;
+                job_options.move_same_volume = effective_same_volume_move;
                 spawn_job(
                     &app_handle,
                     &group_id,
-                    source.clone(),
-                    source_selection.clone(),
-                    destination,
-                    1,
-                    verification_mode,
-                    checksum_algorithm,
-                    source_name.clone(),
-                    organize.clone(),
-                    effective_move,
-                    effective_same_volume_move,
-                    legacy_checksum_algorithm,
-                    save_log_to_destination,
-                    create_per_file_mhl,
+                    SpawnJobRequest {
+                        source: source.clone(),
+                        source_selection: source_selection.clone(),
+                        destination,
+                        hop: 1,
+                        options: job_options,
+                    },
                 );
             }
         }
@@ -215,7 +214,9 @@ pub fn start_transfer_group<R: Runtime>(
             let rest: Vec<PathBuf> = iter.collect();
 
             let hop1_job_id = Uuid::new_v4().to_string();
-            let cancel_flag = app_handle.state::<JobRegistry>().register(hop1_job_id.clone());
+            let cancel_flag = app_handle
+                .state::<JobRegistry>()
+                .register(hop1_job_id.clone());
             let _ = app_handle.emit(
                 GROUP_JOB_ADDED_EVENT,
                 GroupJobAddedPayload {
@@ -240,8 +241,7 @@ pub fn start_transfer_group<R: Runtime>(
             let app_handle_thread = app_handle.clone();
             let group_id_thread = group_id.clone();
             let primary_thread = primary.clone();
-            let source_name_thread = source_name.clone();
-            let organize_thread = organize.clone();
+            let options_thread = options;
             let hop1_job_id_thread = hop1_job_id.clone();
             let source_selection_thread = source_selection.clone();
 
@@ -258,7 +258,9 @@ pub fn start_transfer_group<R: Runtime>(
                             job_id: hop1_job_id_thread.clone(),
                         },
                     );
-                    app_handle_thread.state::<JobRegistry>().remove(&hop1_job_id_thread);
+                    app_handle_thread
+                        .state::<JobRegistry>()
+                        .remove(&hop1_job_id_thread);
                     return;
                 }
 
@@ -268,20 +270,14 @@ pub fn start_transfer_group<R: Runtime>(
                 // this cascade relays to afterward.
                 let outcome = copy_engine::run_copy_job(
                     app_handle_thread.clone(),
-                    hop1_job_id,
-                    source,
-                    source_selection_thread.clone(),
-                    primary_thread.clone(),
-                    cancel_flag,
-                    verification_mode,
-                    checksum_algorithm,
-                    source_name_thread.clone(),
-                    organize_thread.clone(),
-                    move_after_transfer,
-                    move_same_volume,
-                    legacy_checksum_algorithm,
-                    save_log_to_destination,
-                    create_per_file_mhl,
+                    copy_engine::CopyJobRequest {
+                        job_id: hop1_job_id,
+                        source,
+                        source_selection: source_selection_thread.clone(),
+                        destination: primary_thread.clone(),
+                        cancel_flag,
+                        options: options_thread.clone(),
+                    },
                 );
 
                 if !should_cascade_continue(&outcome) {
@@ -306,22 +302,19 @@ pub fn start_transfer_group<R: Runtime>(
                     // is never Move- or same-volume-move-eligible regardless
                     // of the caller's settings. The paper-trail settings
                     // aren't destructive, so hop 2 still honors them.
+                    let mut relay_options = options_thread.clone();
+                    relay_options.move_after_transfer = false;
+                    relay_options.move_same_volume = false;
                     spawn_job(
                         &app_handle_thread,
                         &group_id_thread,
-                        primary_thread.clone(),
-                        relay_selection.clone(),
-                        destination,
-                        2,
-                        verification_mode,
-                        checksum_algorithm,
-                        source_name_thread.clone(),
-                        organize_thread.clone(),
-                        false,
-                        false,
-                        legacy_checksum_algorithm,
-                        save_log_to_destination,
-                        create_per_file_mhl,
+                        SpawnJobRequest {
+                            source: primary_thread.clone(),
+                            source_selection: relay_selection.clone(),
+                            destination,
+                            hop: 2,
+                            options: relay_options,
+                        },
                     );
                 }
             });
@@ -334,7 +327,10 @@ pub fn start_transfer_group<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::checksum::ChecksumAlgorithm;
     use crate::copy_engine::{run_copy_core, FailedFile, ProgressPayload, ProgressSink};
+    use crate::copy_engine::VerificationMode;
+    use crate::organize::OrganizeSettings;
     use crate::source_selection::SourceSelection;
     use std::fs;
     use std::sync::atomic::AtomicBool;
@@ -363,13 +359,15 @@ mod tests {
             source_dir.path(),
             primary_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
         assert!(should_cascade_continue(&hop1));
 
@@ -379,13 +377,15 @@ mod tests {
             primary_dir.path(),
             secondary_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(hop2.failed_files.is_empty());
@@ -402,11 +402,8 @@ mod tests {
         let selected_folder = source.path().join("CARD_A");
         fs::create_dir_all(&selected_folder).unwrap();
         fs::write(selected_folder.join("clip.mov"), b"footage").unwrap();
-        let selection = SourceSelection::new(
-            source.path().to_path_buf(),
-            vec![selected_folder],
-        )
-        .unwrap();
+        let selection =
+            SourceSelection::new(source.path().to_path_buf(), vec![selected_folder]).unwrap();
 
         let outcome = crate::copy_engine::run_copy_core_with_selection(
             &NoopSink,
@@ -414,16 +411,17 @@ mod tests {
             &selection,
             primary.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
-        let relay =
-            selection_for_relay(Some(&selection), primary.path(), &outcome).unwrap();
+        let relay = selection_for_relay(Some(&selection), primary.path(), &outcome).unwrap();
 
         let relay = relay.expect("selected cascades must stay selected on hop 2");
         assert_eq!(relay.common_root(), primary.path());
@@ -440,36 +438,40 @@ mod tests {
         let selected_folder = source.path().join("CARD_A");
         fs::create_dir_all(selected_folder.join("DCIM")).unwrap();
         fs::write(selected_folder.join("DCIM").join("clip.mov"), b"footage").unwrap();
-        let selection = SourceSelection::new(
-            source.path().to_path_buf(),
-            vec![selected_folder],
-        )
-        .unwrap();
-        let mut organize = OrganizeSettings::default();
-        organize.flatten = true;
+        let selection =
+            SourceSelection::new(source.path().to_path_buf(), vec![selected_folder]).unwrap();
+        let organize = OrganizeSettings {
+            flatten: true,
+            ..OrganizeSettings::default()
+        };
         let outcome = crate::copy_engine::run_copy_core_with_selection(
             &NoopSink,
             "flatten-hop1".to_string(),
             &selection,
             primary.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &organize,
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &organize,
+                false,
+                false,
+                None,
+            ),
         );
 
-        let relay =
-            selection_for_relay(Some(&selection), primary.path(), &outcome).unwrap();
+        let relay = selection_for_relay(Some(&selection), primary.path(), &outcome).unwrap();
 
         let relay = relay.expect("selected cascade relay");
         assert_eq!(relay.selected_paths(), &[primary.path().join("clip.mov")]);
     }
 
-    fn test_outcome(cancelled: bool, files_copied: u64, failed_files: Vec<FailedFile>) -> CopyOutcome {
+    fn test_outcome(
+        cancelled: bool,
+        files_copied: u64,
+        failed_files: Vec<FailedFile>,
+    ) -> CopyOutcome {
         CopyOutcome {
             cancelled,
             files_copied,

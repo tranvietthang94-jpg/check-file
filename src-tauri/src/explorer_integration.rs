@@ -988,7 +988,10 @@ fn build_file_drop_payload(paths: &[&Path]) -> io::Result<Vec<u8>> {
         if encoded.contains(&0) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("clipboard path contains a NUL character: {}", path.display()),
+                format!(
+                    "clipboard path contains a NUL character: {}",
+                    path.display()
+                ),
             ));
         }
         for unit in encoded {
@@ -1136,12 +1139,12 @@ where
 }
 
 fn probe_destination_writable(destination: &Path) -> io::Result<()> {
-    let probe = destination.join(format!(
-        ".offloadkit-write-probe-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let probe = destination.join(format!(".offloadkit-write-probe-{}", uuid::Uuid::new_v4()));
     let result = (|| {
-        let file = OpenOptions::new().write(true).create_new(true).open(&probe)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)?;
         file.sync_all()?;
         drop(file);
         fs::remove_file(&probe)
@@ -1282,9 +1285,8 @@ mod native_file_drop {
             return Err(io::Error::last_os_error());
         }
 
-        let memory = GlobalMemory(unsafe {
-            GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, payload.len())
-        });
+        let memory =
+            GlobalMemory(unsafe { GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, payload.len()) });
         if memory.0.is_null() {
             return Err(io::Error::last_os_error());
         }
@@ -1316,16 +1318,13 @@ mod native_file_drop {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let count = unsafe {
-            DragQueryFileW(handle, DRAG_QUERY_FILE_COUNT, ptr::null_mut(), 0)
-        };
+        let count = unsafe { DragQueryFileW(handle, DRAG_QUERY_FILE_COUNT, ptr::null_mut(), 0) };
         let mut paths = Vec::with_capacity(count as usize);
         for index in 0..count {
             let length = unsafe { DragQueryFileW(handle, index, ptr::null_mut(), 0) };
             let mut buffer = vec![0u16; length as usize + 1];
-            let written = unsafe {
-                DragQueryFileW(handle, index, buffer.as_mut_ptr(), buffer.len() as u32)
-            };
+            let written =
+                unsafe { DragQueryFileW(handle, index, buffer.as_mut_ptr(), buffer.len() as u32) };
             if written == 0 && length != 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -1442,9 +1441,9 @@ where
 pub fn handle_secondary_instance(app: &AppHandle, args: Vec<String>) {
     let activation = parse_explorer_activation(args.into_iter().map(OsString::from));
     let activation = match activation {
-        ExplorerActivation::Request(request) => ExplorerActivation::Request(
-            app.state::<ExplorerCopyAggregationState>().merge(request),
-        ),
+        ExplorerActivation::Request(request) => {
+            ExplorerActivation::Request(app.state::<ExplorerCopyAggregationState>().merge(request))
+        }
         other => other,
     };
     let activation = prepare_explorer_activation(activation);
@@ -1543,8 +1542,7 @@ fn validate_paths(action: &ExplorerAction, paths: &[PathBuf]) -> Result<(), Expl
     if matches!(
         action,
         ExplorerAction::SetDestination | ExplorerAction::Paste
-    ) && paths.len()
-        != 1
+    ) && paths.len() != 1
     {
         return Err(ExplorerRequestError::new(
             "Explorer destination or paste action requires exactly one path",
@@ -1702,9 +1700,9 @@ mod tests {
         explorer_verbs, install_with_registry, integration_status_with_registry,
         parse_explorer_activation, parse_explorer_request, prepare_request_with_clipboard,
         uninstall_with_registry, validate_paste_destination_with_probe, ExplorerAction,
-        ExplorerActivation, ExplorerEvent, ExplorerPendingState, MemoryFileDropClipboard,
-        MemoryRegistry, NativeFileDropClipboard, RegistryAccess, RegistryScope,
-        ExplorerCopyAggregationState, TestRegistryNamespace,
+        ExplorerActivation, ExplorerCopyAggregationState, ExplorerEvent, ExplorerPendingState,
+        MemoryFileDropClipboard, MemoryRegistry, NativeFileDropClipboard, RegistryAccess,
+        RegistryScope, TestRegistryNamespace,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -1792,7 +1790,10 @@ mod tests {
         let prepared = prepare_request_with_clipboard(request, &clipboard).unwrap();
 
         assert_eq!(prepared.action, ExplorerAction::Paste);
-        assert_eq!(prepared.destination_path.as_deref(), Some(destination.path()));
+        assert_eq!(
+            prepared.destination_path.as_deref(),
+            Some(destination.path())
+        );
         let selection = prepared.source_selection.unwrap();
         assert_eq!(selection.common_root(), source.path());
         assert_eq!(selection.selected_paths(), &[folder]);
@@ -1822,24 +1823,18 @@ mod tests {
         )
         .unwrap();
 
-        let overlap = validate_paste_destination_with_probe(
-            &selection,
-            &nested_destination,
-            |_| Ok(()),
-        )
-        .unwrap_err();
+        let overlap =
+            validate_paste_destination_with_probe(&selection, &nested_destination, |_| Ok(()))
+                .unwrap_err();
         let destination = tempdir().unwrap();
-        let unwritable = validate_paste_destination_with_probe(
-            &selection,
-            destination.path(),
-            |_| {
+        let unwritable =
+            validate_paste_destination_with_probe(&selection, destination.path(), |_| {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
                     "simulated read-only destination",
                 ))
-            },
-        )
-        .unwrap_err();
+            })
+            .unwrap_err();
 
         assert!(overlap.to_string().contains("overlap"));
         assert!(unwritable.to_string().contains("writable"));
@@ -1860,7 +1855,9 @@ mod tests {
         assert!(!explorer_action_requires_focus(&ExplorerAction::Copy));
         assert!(explorer_action_requires_focus(&ExplorerAction::Paste));
         assert!(explorer_action_requires_focus(&ExplorerAction::SetSource));
-        assert!(explorer_action_requires_focus(&ExplorerAction::SetDestination));
+        assert!(explorer_action_requires_focus(
+            &ExplorerAction::SetDestination
+        ));
     }
 
     #[test]
@@ -2081,9 +2078,7 @@ mod tests {
         assert!(keys.contains(&r"Software\Classes\*\shell\OffloadKit.Copy"));
         assert!(keys.contains(&r"Software\Classes\Directory\shell\OffloadKit.Copy"));
         assert!(keys.contains(&r"Software\Classes\Directory\shell\OffloadKit.Paste"));
-        assert!(keys.contains(
-            &r"Software\Classes\Directory\Background\shell\OffloadKit.Paste"
-        ));
+        assert!(keys.contains(&r"Software\Classes\Directory\Background\shell\OffloadKit.Paste"));
     }
 
     #[cfg(windows)]
@@ -2121,16 +2116,13 @@ mod tests {
         fs::write(&selected_audio, b"phase13b selected audio bytes").unwrap();
         fs::write(&unselected, b"must remain source-only").unwrap();
 
-        let copy = parse_explorer_request(explorer_args(
-            "copy",
-            &[&selected_folder, &selected_audio],
-        ))
-        .unwrap();
+        let copy =
+            parse_explorer_request(explorer_args("copy", &[&selected_folder, &selected_audio]))
+                .unwrap();
         let copy = prepare_request_with_clipboard(copy, &NativeFileDropClipboard).unwrap();
         assert_eq!(copy.paths.len(), 2);
 
-        let paste =
-            parse_explorer_request(explorer_args("paste", &[&destination])).unwrap();
+        let paste = parse_explorer_request(explorer_args("paste", &[&destination])).unwrap();
         let paste = prepare_request_with_clipboard(paste, &NativeFileDropClipboard).unwrap();
         let selection = paste.source_selection.unwrap();
         let outcome = run_copy_core_with_selection(
@@ -2139,13 +2131,15 @@ mod tests {
             &selection,
             &destination,
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Sha1,
-            "Phase13B Smoke",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Sha1,
+                "Phase13B Smoke",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         let destination_video = destination.join("CARD_A").join("DCIM").join("A001.mov");

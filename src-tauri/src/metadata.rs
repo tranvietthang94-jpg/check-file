@@ -182,7 +182,14 @@ fn parse_frame_rate(raw: &str) -> Option<f64> {
 pub fn probe_with_ffprobe(path: &Path) -> Option<MediaMetadata> {
     let ffprobe = ffprobe_path()?;
     let output = Command::new(ffprobe)
-        .args(["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"])
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+        ])
         .arg(path)
         .output()
         .ok()?;

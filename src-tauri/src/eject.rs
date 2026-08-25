@@ -141,7 +141,10 @@ mod imp {
     /// DiskArbitration/IOKit FFI binding this project has no way to verify
     /// without real Mac hardware (see the project plan's documented risk).
     pub fn eject(mount_point: &str) -> io::Result<()> {
-        let status = Command::new("diskutil").arg("eject").arg(mount_point).status()?;
+        let status = Command::new("diskutil")
+            .arg("eject")
+            .arg(mount_point)
+            .status()?;
         if status.success() {
             Ok(())
         } else {

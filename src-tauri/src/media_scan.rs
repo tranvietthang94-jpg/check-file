@@ -45,9 +45,8 @@ fn build_entry(path: &Path, relative: &Path, cache_dir: Option<&Path>) -> MediaE
         .unwrap_or(SystemTime::UNIX_EPOCH);
     let kind = metadata::classify(path);
 
-    let thumbnail_base64 = cache_dir.and_then(|dir| {
-        metadata::get_or_create_thumbnail_base64(path, kind, size, modified, dir)
-    });
+    let thumbnail_base64 = cache_dir
+        .and_then(|dir| metadata::get_or_create_thumbnail_base64(path, kind, size, modified, dir));
 
     MediaEntry {
         path: relative.display().to_string(),

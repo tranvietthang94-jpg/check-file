@@ -9,9 +9,10 @@ use sha2::{Digest as _, Sha512};
 use xxhash_rust::xxh3::Xxh3;
 use xxhash_rust::xxh64::Xxh64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChecksumAlgorithm {
+    #[default]
     Xxh64,
     Xxh3,
     Xxh128,
@@ -21,12 +22,6 @@ pub enum ChecksumAlgorithm {
     /// (`c4` + 88-digit base58), per the Avid/ASC C4 identifier spec
     /// (https://github.com/Avid-Technology/c4/blob/master/c4.md).
     C4,
-}
-
-impl Default for ChecksumAlgorithm {
-    fn default() -> Self {
-        ChecksumAlgorithm::Xxh64
-    }
 }
 
 /// Incremental hasher so checksums can be computed inline while a file is
@@ -139,7 +134,10 @@ pub fn hash_file_dual(
             h.update(&buffer[..n]);
         }
     }
-    Ok((hasher.finalize_hex(), legacy_hasher.map(|h| h.finalize_hex())))
+    Ok((
+        hasher.finalize_hex(),
+        legacy_hasher.map(|h| h.finalize_hex()),
+    ))
 }
 
 /// Re-reads `path` and compares its checksum against `expected_hash`.
@@ -201,7 +199,11 @@ mod tests {
 
         let mut c = StreamingHasher::new(ChecksumAlgorithm::Xxh64);
         c.update(b"offloadkit!");
-        assert_ne!(hash_a, c.finalize_hex(), "different input must hash differently");
+        assert_ne!(
+            hash_a,
+            c.finalize_hex(),
+            "different input must hash differently"
+        );
     }
 
     #[test]
@@ -224,11 +226,18 @@ mod tests {
         let path = dir.path().join("f.bin");
         fs::write(&path, b"camera footage").unwrap();
 
-        let (primary, legacy) =
-            hash_file_dual(&path, ChecksumAlgorithm::Xxh64, Some(ChecksumAlgorithm::Sha1)).unwrap();
+        let (primary, legacy) = hash_file_dual(
+            &path,
+            ChecksumAlgorithm::Xxh64,
+            Some(ChecksumAlgorithm::Sha1),
+        )
+        .unwrap();
 
         assert_eq!(primary, hash_file(&path, ChecksumAlgorithm::Xxh64).unwrap());
-        assert_eq!(legacy, Some(hash_file(&path, ChecksumAlgorithm::Sha1).unwrap()));
+        assert_eq!(
+            legacy,
+            Some(hash_file(&path, ChecksumAlgorithm::Sha1).unwrap())
+        );
     }
 
     #[test]
@@ -269,14 +278,18 @@ mod tests {
 
         let mut c = StreamingHasher::new(ChecksumAlgorithm::C4);
         c.update(b"offloadkit!");
-        assert_ne!(id_a, c.finalize_hex(), "different input must hash differently");
+        assert_ne!(
+            id_a,
+            c.finalize_hex(),
+            "different input must hash differently"
+        );
 
         assert_eq!(id_a.len(), 90, "c4 + 88 base58 digits");
         assert!(id_a.starts_with("c4"));
         assert!(
-            id_a[2..]
-                .bytes()
-                .all(|b| b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".contains(&b)),
+            id_a[2..].bytes().all(|b| {
+                b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".contains(&b)
+            }),
             "suffix must only use the C4 base58 alphabet"
         );
     }

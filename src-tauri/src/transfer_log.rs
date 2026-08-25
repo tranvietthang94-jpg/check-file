@@ -64,8 +64,7 @@ pub struct TransferLogEntry {
 pub fn save_log_to_dir(dir: &Path, entry: &TransferLogEntry) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.json", entry.job_id));
-    let json = serde_json::to_string_pretty(entry)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    let json = serde_json::to_string_pretty(entry).map_err(|e| io::Error::other(e.to_string()))?;
     crate::atomic_file::write_atomic(&path, json.as_bytes())
 }
 
@@ -95,7 +94,7 @@ pub fn logs_dir<R: Runtime>(app_handle: &AppHandle<R>) -> io::Result<PathBuf> {
     let base = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(base.join("transfer_logs"))
 }
 
@@ -152,7 +151,8 @@ mod tests {
         fs::write(&path, "old incomplete data").unwrap();
         save_log_to_dir(dir.path(), &sample_entry("atomic", "2026-07-03T00:00:00Z")).unwrap();
 
-        let saved: TransferLogEntry = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        let saved: TransferLogEntry =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(saved.job_id, "atomic");
     }
 
@@ -166,7 +166,10 @@ mod tests {
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].job_id, "job-1");
         assert_eq!(logs[0].files_copied, 3);
-        assert_eq!(logs[0].mhl_path.as_deref(), Some("D:\\Offload\\20260703_200005.mhl"));
+        assert_eq!(
+            logs[0].mhl_path.as_deref(),
+            Some("D:\\Offload\\20260703_200005.mhl")
+        );
     }
 
     #[test]
@@ -179,8 +182,8 @@ mod tests {
     #[test]
     fn logs_are_listed_newest_first() {
         let dir = tempfile::tempdir().unwrap();
-        save_log_to_dir(&dir.path(), &sample_entry("older", "2026-07-01T00:00:00Z")).unwrap();
-        save_log_to_dir(&dir.path(), &sample_entry("newer", "2026-07-03T00:00:00Z")).unwrap();
+        save_log_to_dir(dir.path(), &sample_entry("older", "2026-07-01T00:00:00Z")).unwrap();
+        save_log_to_dir(dir.path(), &sample_entry("newer", "2026-07-03T00:00:00Z")).unwrap();
 
         let ids: Vec<String> = list_logs_from_dir(dir.path())
             .unwrap()

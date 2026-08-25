@@ -56,7 +56,11 @@ pub fn resolve_duplicate(
 /// Finds the first `name 2.ext`, `name 3.ext`, ... that doesn't already exist.
 pub(crate) fn next_available_name(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+    let stem = path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
 
     let mut counter = 2u32;

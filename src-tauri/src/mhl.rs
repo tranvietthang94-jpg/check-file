@@ -83,7 +83,11 @@ fn write_text_element(
 /// completed transfer -- the format OffShoot itself defaults to outside its
 /// Pro/ASC-MHL tier, and the simpler of the two since it's a single flat
 /// file with no chain-of-custody bookkeeping.
-pub fn render_mhl(entries: &[MhlFileEntry], started_at: SystemTime, finished_at: SystemTime) -> String {
+pub fn render_mhl(
+    entries: &[MhlFileEntry],
+    started_at: SystemTime,
+    finished_at: SystemTime,
+) -> String {
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
     writer
@@ -106,26 +110,30 @@ pub fn render_mhl(entries: &[MhlFileEntry], started_at: SystemTime, finished_at:
                 })?;
 
             for entry in entries {
-                writer.create_element("hash").write_inner_content(|writer| {
-                    write_text_element(writer, "file", &entry.relative_path)?;
-                    write_text_element(writer, "size", &entry.size.to_string())?;
-                    write_text_element(
-                        writer,
-                        "lastmodificationdate",
-                        &iso8601(entry.modified),
-                    )?;
-                    match &entry.checksum {
-                        Some(hash) => write_text_element(writer, hash_tag(entry.algorithm), hash)?,
-                        None => write_text_element(writer, "null", "")?,
-                    }
-                    if let (Some(hash), Some(algorithm)) =
-                        (&entry.legacy_checksum, entry.legacy_algorithm)
-                    {
-                        write_text_element(writer, hash_tag(algorithm), hash)?;
-                    }
-                    write_text_element(writer, "hashdate", &iso8601(entry.hashed_at))?;
-                    Ok(())
-                })?;
+                writer
+                    .create_element("hash")
+                    .write_inner_content(|writer| {
+                        write_text_element(writer, "file", &entry.relative_path)?;
+                        write_text_element(writer, "size", &entry.size.to_string())?;
+                        write_text_element(
+                            writer,
+                            "lastmodificationdate",
+                            &iso8601(entry.modified),
+                        )?;
+                        match &entry.checksum {
+                            Some(hash) => {
+                                write_text_element(writer, hash_tag(entry.algorithm), hash)?
+                            }
+                            None => write_text_element(writer, "null", "")?,
+                        }
+                        if let (Some(hash), Some(algorithm)) =
+                            (&entry.legacy_checksum, entry.legacy_algorithm)
+                        {
+                            write_text_element(writer, hash_tag(algorithm), hash)?;
+                        }
+                        write_text_element(writer, "hashdate", &iso8601(entry.hashed_at))?;
+                        Ok(())
+                    })?;
             }
             Ok(())
         })
@@ -270,10 +278,12 @@ pub fn parse_mhl(xml: &str) -> quick_xml::Result<Vec<ParsedMhlEntry>> {
                         for attribute in e.attributes().flatten() {
                             match attribute.key.as_ref() {
                                 b"size" => {
-                                    path_size = String::from_utf8_lossy(&attribute.value).parse().ok()
+                                    path_size =
+                                        String::from_utf8_lossy(&attribute.value).parse().ok()
                                 }
                                 b"lastmodificationdate" => {
-                                    path_modified = parse_iso8601(&String::from_utf8_lossy(&attribute.value))
+                                    path_modified =
+                                        parse_iso8601(&String::from_utf8_lossy(&attribute.value))
                                 }
                                 _ => {}
                             }
@@ -325,7 +335,8 @@ pub fn parse_mhl(xml: &str) -> quick_xml::Result<Vec<ParsedMhlEntry>> {
                         "file" => file = Some(std::mem::take(&mut current_text)),
                         "path" => {
                             file = Some(std::mem::take(&mut current_text));
-                            if let Some((path_size, path_modified)) = current_path_attributes.take() {
+                            if let Some((path_size, path_modified)) = current_path_attributes.take()
+                            {
                                 size = Some(path_size);
                                 modified = Some(path_modified);
                             }
@@ -362,7 +373,12 @@ pub fn load_source_mhl_index(source: &Path) -> HashMap<PathBuf, ParsedMhlEntry> 
     };
     for entry in read_dir.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("mhl")) != Some(true) {
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("mhl"))
+            != Some(true)
+        {
             continue;
         }
         let Ok(xml) = fs::read_to_string(&path) else {
@@ -531,7 +547,9 @@ pub fn plan_mhl_repair(
     let entry = entries
         .into_iter()
         .find(|entry| Path::new(&entry.relative_path) == relative_path)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file is not recorded in the MHL"))?;
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "file is not recorded in the MHL")
+        })?;
     let algorithm = entry
         .algorithm
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MHL entry has no checksum"))?;
@@ -688,7 +706,9 @@ pub fn repair_mhl_entry_from_report(
     let entry = entries
         .into_iter()
         .find(|entry| Path::new(&entry.relative_path) == relative_path)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file is not recorded in the MHL"))?;
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "file is not recorded in the MHL")
+        })?;
     let algorithm = entry
         .algorithm
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "MHL entry has no checksum"))?;
@@ -713,7 +733,12 @@ pub fn verify_mhls_in_folder(folder: &Path) -> io::Result<Vec<MhlVerifyReport>> 
     let mut reports = Vec::new();
     for entry in fs::read_dir(folder)?.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("mhl")) == Some(true) {
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("mhl"))
+            == Some(true)
+        {
             reports.push(verify_mhl_file(&path)?);
         }
     }
@@ -744,11 +769,8 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         fs::write(destination.path().join("clip.mov"), b"broken").unwrap();
         fs::write(source.path().join("clip.mov"), b"good footage").unwrap();
-        let expected = checksum::hash_file(
-            &source.path().join("clip.mov"),
-            ChecksumAlgorithm::Xxh64,
-        )
-        .unwrap();
+        let expected =
+            checksum::hash_file(&source.path().join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
         let entry = MhlFileEntry {
             relative_path: "clip.mov".to_string(),
             size: 12,
@@ -777,7 +799,10 @@ mod tests {
 
         assert_eq!(plan.candidates.len(), 1);
         assert_eq!(plan.candidates[0].checksum, expected);
-        assert_eq!(fs::read(destination.path().join("clip.mov")).unwrap(), b"broken");
+        assert_eq!(
+            fs::read(destination.path().join("clip.mov")).unwrap(),
+            b"broken"
+        );
     }
 
     #[test]
@@ -838,7 +863,11 @@ mod tests {
 
     #[test]
     fn renders_the_required_top_level_structure() {
-        let xml = render_mhl(&[sample_entry()], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH);
+        let xml = render_mhl(
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        );
         assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
         assert!(xml.contains("<hashlist version=\"1.1\">"));
         assert!(xml.contains("<creatorinfo>"));
@@ -850,7 +879,11 @@ mod tests {
 
     #[test]
     fn xxh64_entries_use_the_xxhash64be_tag() {
-        let xml = render_mhl(&[sample_entry()], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH);
+        let xml = render_mhl(
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        );
         assert!(xml.contains("<xxhash64be>0ea03b369a463d9d</xxhash64be>"));
     }
 
@@ -865,7 +898,11 @@ mod tests {
         let mut sha1_entry = sample_entry();
         sha1_entry.algorithm = ChecksumAlgorithm::Sha1;
         sha1_entry.checksum = Some("da39a3ee5e6b4b0d3255bfef95601890afd80709".to_string());
-        let xml = render_mhl(&[sha1_entry], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH);
+        let xml = render_mhl(
+            &[sha1_entry],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        );
         assert!(xml.contains("<sha1>da39a3ee5e6b4b0d3255bfef95601890afd80709</sha1>"));
     }
 
@@ -900,13 +937,24 @@ mod tests {
         .unwrap();
 
         assert!(path.is_file());
-        assert!(!path.with_file_name(format!("{}.tmp", path.file_name().unwrap().to_string_lossy())).exists());
+        assert!(!path
+            .with_file_name(format!(
+                "{}.tmp",
+                path.file_name().unwrap().to_string_lossy()
+            ))
+            .exists());
     }
 
     #[test]
     fn write_mhl_is_a_no_op_when_there_are_no_entries() {
         let dir = tempfile::tempdir().unwrap();
-        let result = write_mhl(dir.path(), &[], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH).unwrap();
+        let result = write_mhl(
+            dir.path(),
+            &[],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap();
         assert!(result.is_none());
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
     }
@@ -930,9 +978,14 @@ mod tests {
     #[test]
     fn write_mhl_creates_a_real_file_at_the_destination_root() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write_mhl(dir.path(), &[sample_entry()], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .expect("entries were provided");
+        let path = write_mhl(
+            dir.path(),
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        )
+        .unwrap()
+        .expect("entries were provided");
 
         assert_eq!(path.parent().unwrap(), dir.path());
         assert!(path.extension().and_then(|e| e.to_str()) == Some("mhl"));
@@ -996,7 +1049,11 @@ mod tests {
     #[test]
     fn load_source_mhl_index_indexes_files_from_every_mhl_at_the_source_root() {
         let dir = tempfile::tempdir().unwrap();
-        let xml = render_mhl(&[sample_entry()], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH);
+        let xml = render_mhl(
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        );
         fs::write(dir.path().join("card.mhl"), xml).unwrap();
         // A non-MHL file in the same folder must not confuse the scan.
         fs::write(dir.path().join("notes.txt"), "hello").unwrap();
@@ -1009,7 +1066,11 @@ mod tests {
     #[test]
     fn reusable_checksum_returns_none_when_size_or_mtime_moved_on() {
         let dir = tempfile::tempdir().unwrap();
-        let xml = render_mhl(&[sample_entry()], SystemTime::UNIX_EPOCH, SystemTime::UNIX_EPOCH);
+        let xml = render_mhl(
+            &[sample_entry()],
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH,
+        );
         fs::write(dir.path().join("card.mhl"), xml).unwrap();
         let index = load_source_mhl_index(dir.path());
         let relative = PathBuf::from("CLIP/C0001.MP4");
@@ -1088,11 +1149,16 @@ mod tests {
             relative_path: "linked/clip.mov".to_string(),
             size: 13,
             modified: SystemTime::UNIX_EPOCH,
-            checksum: Some(checksum::hash_file(&outside.join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap()),
+            checksum: Some(
+                checksum::hash_file(&outside.join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap(),
+            ),
             algorithm: Some(ChecksumAlgorithm::Xxh64),
         };
 
-        assert_eq!(verify_entry_against_disk(&entry, &root), MhlEntryStatus::Missing);
+        assert_eq!(
+            verify_entry_against_disk(&entry, &root),
+            MhlEntryStatus::Missing
+        );
     }
 
     #[cfg(any(unix, windows))]
@@ -1110,7 +1176,8 @@ mod tests {
         std::os::unix::fs::symlink(&outside, source.join("linked")).unwrap();
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&outside, source.join("linked")).unwrap();
-        let expected = checksum::hash_file(&outside.join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
+        let expected =
+            checksum::hash_file(&outside.join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
 
         assert!(repair_mhl_entry(
             &destination,
@@ -1119,7 +1186,8 @@ mod tests {
             ChecksumAlgorithm::Xxh64,
             &expected,
             true,
-        ).is_err());
+        )
+        .is_err());
         assert!(!destination.join("linked/clip.mov").exists());
     }
 
@@ -1140,11 +1208,8 @@ mod tests {
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&outside, destination.join("linked")).unwrap();
 
-        let expected = checksum::hash_file(
-            &source.join("linked/clip.mov"),
-            ChecksumAlgorithm::Xxh64,
-        )
-        .unwrap();
+        let expected =
+            checksum::hash_file(&source.join("linked/clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
         assert!(repair_mhl_entry(
             &destination,
             Path::new("linked/clip.mov"),
@@ -1168,11 +1233,8 @@ mod tests {
         )
         .unwrap();
         fs::write(source.path().join("clip.mov"), b"known good bytes").unwrap();
-        let expected = checksum::hash_file(
-            &source.path().join("clip.mov"),
-            ChecksumAlgorithm::Xxh64,
-        )
-        .unwrap();
+        let expected =
+            checksum::hash_file(&source.path().join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
 
         repair_mhl_entry(
             destination.path(),
@@ -1200,11 +1262,8 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         fs::write(destination.path().join("clip.mov"), b"bad bytes").unwrap();
         fs::write(source.path().join("clip.mov"), b"known good bytes").unwrap();
-        let expected = checksum::hash_file(
-            &source.path().join("clip.mov"),
-            ChecksumAlgorithm::Xxh64,
-        )
-        .unwrap();
+        let expected =
+            checksum::hash_file(&source.path().join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
 
         repair_mhl_entry(
             destination.path(),
@@ -1232,11 +1291,8 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         fs::write(destination.path().join("clip.mov"), b"bad bytes").unwrap();
         fs::write(source.path().join("clip.mov"), b"known good bytes").unwrap();
-        let expected = checksum::hash_file(
-            &source.path().join("clip.mov"),
-            ChecksumAlgorithm::Xxh64,
-        )
-        .unwrap();
+        let expected =
+            checksum::hash_file(&source.path().join("clip.mov"), ChecksumAlgorithm::Xxh64).unwrap();
 
         assert!(repair_mhl_entry(
             destination.path(),
@@ -1258,7 +1314,10 @@ mod tests {
         let source_root = PathBuf::from(r"F:\Adobe Premiere Pro Auto-Save");
         let source_name = "AD--9d8890ef-c5ad-f899-d794-64788ed9c875-2026-05-29_14-11-38.prproj";
         let source = source_root.join(source_name);
-        assert!(source.is_file(), "missing real Auto-Save source: {source:?}");
+        assert!(
+            source.is_file(),
+            "missing real Auto-Save source: {source:?}"
+        );
         let destination_root = source_root.join("_OffloadKit_Repair_Smoke");
         if destination_root.exists() {
             fs::remove_dir_all(&destination_root).unwrap();
@@ -1279,13 +1338,21 @@ mod tests {
             legacy_checksum: None,
             legacy_algorithm: None,
         };
-        let mhl_path = write_mhl(&destination_root, &[entry], SystemTime::now(), SystemTime::now())
-            .unwrap()
-            .expect("real repair smoke MHL should be written");
-        let report = repair_mhl_entry_from_report(&mhl_path, Path::new(source_name), &source_root, true)
-            .unwrap();
+        let mhl_path = write_mhl(
+            &destination_root,
+            &[entry],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap()
+        .expect("real repair smoke MHL should be written");
+        let report =
+            repair_mhl_entry_from_report(&mhl_path, Path::new(source_name), &source_root, true)
+                .unwrap();
         assert_eq!(fs::read(&destination).unwrap(), fs::read(&source).unwrap());
-        assert!(destination.with_file_name(format!("{source_name}.ofkit-corrupt")).is_file());
+        assert!(destination
+            .with_file_name(format!("{source_name}.ofkit-corrupt"))
+            .is_file());
         assert_eq!(report.results[0].status, MhlEntryStatus::Verified);
         fs::remove_dir_all(&destination_root).unwrap();
     }
@@ -1305,11 +1372,17 @@ mod tests {
             checksum: Some(checksum::hash_file(&file_path, ChecksumAlgorithm::Xxh64).unwrap()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
-            legacy_checksum: None, legacy_algorithm: None,
+            legacy_checksum: None,
+            legacy_algorithm: None,
         };
-        let mhl_path = write_mhl(dst_dir.path(), &[entry], SystemTime::now(), SystemTime::now())
-            .unwrap()
-            .unwrap();
+        let mhl_path = write_mhl(
+            dst_dir.path(),
+            &[entry],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap()
+        .unwrap();
 
         let report = verify_mhl_file(&mhl_path).unwrap();
         assert_eq!(report.results.len(), 1);
@@ -1332,7 +1405,8 @@ mod tests {
                 checksum: Some(checksum::hash_file(&good_path, ChecksumAlgorithm::Xxh64).unwrap()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
-                legacy_checksum: None, legacy_algorithm: None,
+                legacy_checksum: None,
+                legacy_algorithm: None,
             },
             MhlFileEntry {
                 relative_path: "corrupted.bin".to_string(),
@@ -1341,7 +1415,8 @@ mod tests {
                 checksum: Some("deadbeefdeadbeef".to_string()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
-                legacy_checksum: None, legacy_algorithm: None,
+                legacy_checksum: None,
+                legacy_algorithm: None,
             },
             MhlFileEntry {
                 relative_path: "missing.bin".to_string(),
@@ -1350,12 +1425,18 @@ mod tests {
                 checksum: Some("0000000000000000".to_string()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
-                legacy_checksum: None, legacy_algorithm: None,
+                legacy_checksum: None,
+                legacy_algorithm: None,
             },
         ];
-        let mhl_path = write_mhl(dst_dir.path(), &entries, SystemTime::now(), SystemTime::now())
-            .unwrap()
-            .unwrap();
+        let mhl_path = write_mhl(
+            dst_dir.path(),
+            &entries,
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap()
+        .unwrap();
 
         let report = verify_mhl_file(&mhl_path).unwrap();
         let status = |name: &str| {
@@ -1386,18 +1467,30 @@ mod tests {
                 checksum: Some(checksum::hash_file(&path, ChecksumAlgorithm::Xxh64).unwrap()),
                 algorithm: ChecksumAlgorithm::Xxh64,
                 hashed_at: SystemTime::now(),
-                legacy_checksum: None, legacy_algorithm: None,
+                legacy_checksum: None,
+                legacy_algorithm: None,
             }
         };
-        let first_path = write_mhl(dst_dir.path(), &[entry_for("a.bin")], SystemTime::now(), SystemTime::now())
-            .unwrap()
-            .unwrap();
+        let first_path = write_mhl(
+            dst_dir.path(),
+            &[entry_for("a.bin")],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap()
+        .unwrap();
         // Filenames are timestamp-based to the second -- rename the first one
         // out of the way so a second MHL written moments later (e.g. from a
         // Resume that only covers what was added afterward) can't collide
         // with and overwrite it.
         fs::rename(&first_path, dst_dir.path().join("first.mhl")).unwrap();
-        write_mhl(dst_dir.path(), &[entry_for("b.bin")], SystemTime::now(), SystemTime::now()).unwrap();
+        write_mhl(
+            dst_dir.path(),
+            &[entry_for("b.bin")],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap();
 
         let reports = verify_mhls_in_folder(dst_dir.path()).unwrap();
         assert_eq!(reports.len(), 2);

@@ -42,10 +42,9 @@ pub fn resolve_broken_media(registry: State<JobRegistry>, job_id: String, procee
     registry.resolve_broken_media(&job_id, proceed);
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub fn start_transfer_group(
-    app_handle: AppHandle,
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartTransferGroupRequest {
     source: String,
     selected_paths: Option<Vec<String>>,
     destinations: Vec<String>,
@@ -59,9 +58,16 @@ pub fn start_transfer_group(
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
     save_log_to_destination: bool,
     create_per_file_mhl: bool,
+}
+
+#[tauri::command]
+pub fn start_transfer_group(
+    app_handle: AppHandle,
+    request: StartTransferGroupRequest,
 ) -> Result<String, String> {
-    let source = PathBuf::from(source);
-    let source_selection = selected_paths
+    let source = PathBuf::from(request.source);
+    let source_selection = request
+        .selected_paths
         .map(|paths| {
             SourceSelection::new(
                 source.clone(),
@@ -72,19 +78,27 @@ pub fn start_transfer_group(
         .map_err(|error| error.to_string())?;
     Ok(cascade::start_transfer_group(
         app_handle,
-        source,
-        source_selection,
-        destinations.into_iter().map(PathBuf::from).collect(),
-        mode,
-        verification_mode,
-        checksum_algorithm,
-        source_name,
-        organize,
-        move_after_transfer,
-        move_same_volume,
-        legacy_checksum_algorithm,
-        save_log_to_destination,
-        create_per_file_mhl,
+        cascade::TransferGroupRequest {
+            source,
+            source_selection,
+            destinations: request
+                .destinations
+                .into_iter()
+                .map(PathBuf::from)
+                .collect(),
+            mode: request.mode,
+            options: crate::copy_engine::TransferOptions {
+                verification_mode: request.verification_mode,
+                checksum_algorithm: request.checksum_algorithm,
+                source_name: request.source_name,
+                organize: request.organize,
+                move_after_transfer: request.move_after_transfer,
+                move_same_volume: request.move_same_volume,
+                legacy_checksum_algorithm: request.legacy_checksum_algorithm,
+                save_log_to_destination: request.save_log_to_destination,
+                create_per_file_mhl: request.create_per_file_mhl,
+            },
+        },
     ))
 }
 

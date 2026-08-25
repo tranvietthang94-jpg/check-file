@@ -152,7 +152,11 @@ mod volume_signature_imp {
     /// documented CLI tool chosen over a DiskArbitration/IOKit FFI binding
     /// this project has no way to verify without real Mac hardware.
     pub fn volume_signature(path: &str) -> Option<String> {
-        let output = Command::new("diskutil").arg("info").arg(path).output().ok()?;
+        let output = Command::new("diskutil")
+            .arg("info")
+            .arg(path)
+            .output()
+            .ok()?;
         if !output.status.success() {
             return None;
         }
@@ -197,7 +201,10 @@ mod tests {
             windows_volume_root("C:\\Users\\tranv\\Desktop"),
             Some("C:\\".to_string())
         );
-        assert_eq!(windows_volume_root("g:\\PRIVATE\\M4ROOT"), Some("G:\\".to_string()));
+        assert_eq!(
+            windows_volume_root("g:\\PRIVATE\\M4ROOT"),
+            Some("G:\\".to_string())
+        );
     }
 
     #[test]

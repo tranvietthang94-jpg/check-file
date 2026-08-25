@@ -315,8 +315,7 @@ fn sanitize_token_value(value: &str) -> String {
     value
         .chars()
         .map(|c| {
-            if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control()
-            {
+            if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || c.is_control() {
                 '_'
             } else {
                 c
@@ -330,21 +329,19 @@ fn sanitize_token_value(value: &str) -> String {
 /// typo degrades to a visibly wrong (but harmless) file name instead of
 /// failing the whole transfer.
 pub fn render_template(template: &str, ctx: &TokenContext) -> String {
-    let mut tokens: Vec<(String, String)> = Vec::new();
-    tokens.push((
-        "{Source Name}".to_string(),
-        sanitize_token_value(&ctx.source_name),
-    ));
-    tokens.push((
-        "{Counter}".to_string(),
-        pad(ctx.counter, ctx.counter_padding),
-    ));
-    tokens.push(("{Filename}".to_string(), ctx.file_stem.clone()));
-    tokens.push(("{File Counter}".to_string(), pad(ctx.counter, 5)));
-    tokens.push((
-        "{File Extension}".to_string(),
-        ctx.file_extension.clone(),
-    ));
+    let mut tokens: Vec<(String, String)> = vec![
+        (
+            "{Source Name}".to_string(),
+            sanitize_token_value(&ctx.source_name),
+        ),
+        (
+            "{Counter}".to_string(),
+            pad(ctx.counter, ctx.counter_padding),
+        ),
+        ("{Filename}".to_string(), ctx.file_stem.clone()),
+        ("{File Counter}".to_string(), pad(ctx.counter, 5)),
+        ("{File Extension}".to_string(), ctx.file_extension.clone()),
+    ];
     tokens.extend(date_tokens("", ctx.job_started));
     tokens.extend(date_tokens("File ", ctx.file_modified));
     tokens.extend(date_tokens(
@@ -366,7 +363,12 @@ pub fn render_template(template: &str, ctx: &TokenContext) -> String {
     rendered
 }
 
-fn build_file_name(ext: &str, ctx: &TokenContext, template: Option<&str>, original_name: &str) -> String {
+fn build_file_name(
+    ext: &str,
+    ctx: &TokenContext,
+    template: Option<&str>,
+    original_name: &str,
+) -> String {
     let Some(template) = template else {
         return original_name.to_string();
     };
@@ -382,7 +384,11 @@ fn build_file_name(ext: &str, ctx: &TokenContext, template: Option<&str>, origin
 /// file, relative to the destination root. Falls back to the original
 /// relative path unchanged when no organize options are configured, so this
 /// is a no-op by default.
-pub fn build_destination_path(relative: &Path, ctx: &TokenContext, settings: &OrganizeSettings) -> PathBuf {
+pub fn build_destination_path(
+    relative: &Path,
+    ctx: &TokenContext,
+    settings: &OrganizeSettings,
+) -> PathBuf {
     let original_name = relative
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -584,8 +590,14 @@ mod tests {
                 c.counter = 1;
             }),
         );
-        assert!(!rendered.contains(':'), "rendered {rendered:?} still has a colon");
-        assert!(!rendered.contains('\\'), "rendered {rendered:?} still has a backslash");
+        assert!(
+            !rendered.contains(':'),
+            "rendered {rendered:?} still has a colon"
+        );
+        assert!(
+            !rendered.contains('\\'),
+            "rendered {rendered:?} still has a backslash"
+        );
     }
 
     #[test]
@@ -596,11 +608,14 @@ mod tests {
             ..OrganizeSettings::default()
         };
         let path = build_destination_path(
-            &relative,
+            relative,
             &ctx(|c| c.source_name = "C:\\".to_string()),
             &settings,
         );
-        assert!(!path.is_absolute(), "path {path:?} escaped to an absolute location");
+        assert!(
+            !path.is_absolute(),
+            "path {path:?} escaped to an absolute location"
+        );
     }
 
     #[test]
@@ -614,15 +629,21 @@ mod tests {
                 }];
             }),
         );
-        assert!(!rendered.contains('\\'), "rendered {rendered:?} still has a backslash");
+        assert!(
+            !rendered.contains('\\'),
+            "rendered {rendered:?} still has a backslash"
+        );
     }
 
     #[test]
     fn file_counter_always_uses_five_digits_regardless_of_counter_padding() {
-        let rendered = render_template("{File Counter}", &ctx(|c| {
-            c.counter = 7;
-            c.counter_padding = 2;
-        }));
+        let rendered = render_template(
+            "{File Counter}",
+            &ctx(|c| {
+                c.counter = 7;
+                c.counter_padding = 2;
+            }),
+        );
         assert_eq!(rendered, "00007");
     }
 
@@ -632,8 +653,14 @@ mod tests {
             "{Source Name}_{Location}_{Project}",
             &ctx(|c| {
                 c.elements = vec![
-                    ElementDefinition { name: "Location".to_string(), value: "Paris".to_string() },
-                    ElementDefinition { name: "Project".to_string(), value: "Ad Shoot".to_string() },
+                    ElementDefinition {
+                        name: "Location".to_string(),
+                        value: "Paris".to_string(),
+                    },
+                    ElementDefinition {
+                        name: "Project".to_string(),
+                        value: "Ad Shoot".to_string(),
+                    },
                 ];
             }),
         );
@@ -645,7 +672,10 @@ mod tests {
         let rendered = render_template(
             "{Filename}-{Location}",
             &ctx(|c| {
-                c.elements = vec![ElementDefinition { name: "Location".to_string(), value: String::new() }];
+                c.elements = vec![ElementDefinition {
+                    name: "Location".to_string(),
+                    value: String::new(),
+                }];
             }),
         );
         assert_eq!(rendered, "C0001-");
@@ -656,7 +686,10 @@ mod tests {
         let rendered = render_template(
             "{Filename}",
             &ctx(|c| {
-                c.elements = vec![ElementDefinition { name: "   ".to_string(), value: "x".to_string() }];
+                c.elements = vec![ElementDefinition {
+                    name: "   ".to_string(),
+                    value: "x".to_string(),
+                }];
             }),
         );
         assert_eq!(rendered, "C0001");
@@ -673,7 +706,12 @@ mod tests {
 
     #[test]
     fn rename_template_auto_appends_original_extension() {
-        let name = build_file_name("MP4", &ctx(|_| {}), Some("{Filename}_{Counter}"), "C0001.MP4");
+        let name = build_file_name(
+            "MP4",
+            &ctx(|_| {}),
+            Some("{Filename}_{Counter}"),
+            "C0001.MP4",
+        );
         assert_eq!(name, "C0001_001.MP4");
     }
 
@@ -698,15 +736,19 @@ mod tests {
 
         let path = build_destination_path(&relative, &ctx(|_| {}), &settings);
 
-        assert!(!path.components().any(|component| matches!(component, Component::ParentDir)));
+        assert!(!path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir)));
         assert!(!path.is_absolute());
     }
 
     #[test]
     fn folder_template_sorts_by_file_extension() {
         let relative = Path::new("CLIP").join("C0001.MP4");
-        let mut settings = OrganizeSettings::default();
-        settings.folder_template = Some("{File Extension}".to_string());
+        let settings = OrganizeSettings {
+            folder_template: Some("{File Extension}".to_string()),
+            ..OrganizeSettings::default()
+        };
         let path = build_destination_path(&relative, &ctx(|_| {}), &settings);
         assert_eq!(path, Path::new("MP4").join("C0001.MP4"));
     }
@@ -714,17 +756,24 @@ mod tests {
     #[test]
     fn folder_template_supports_nested_date_segments() {
         let relative = Path::new("CLIP").join("C0001.MP4");
-        let mut settings = OrganizeSettings::default();
-        settings.folder_template = Some("{File YYYY}/{File MM}/{File DD}".to_string());
+        let settings = OrganizeSettings {
+            folder_template: Some("{File YYYY}/{File MM}/{File DD}".to_string()),
+            ..OrganizeSettings::default()
+        };
         let path = build_destination_path(&relative, &ctx(|_| {}), &settings);
-        assert_eq!(path, Path::new("2020").join("09").join("02").join("C0001.MP4"));
+        assert_eq!(
+            path,
+            Path::new("2020").join("09").join("02").join("C0001.MP4")
+        );
     }
 
     #[test]
     fn flatten_discards_original_subdirectories() {
         let relative = Path::new("CLIP").join("nested").join("C0001.MP4");
-        let mut settings = OrganizeSettings::default();
-        settings.flatten = true;
+        let settings = OrganizeSettings {
+            flatten: true,
+            ..OrganizeSettings::default()
+        };
         let path = build_destination_path(&relative, &ctx(|_| {}), &settings);
         assert_eq!(path, Path::new("C0001.MP4"));
     }
@@ -751,7 +800,10 @@ mod tests {
             mode: SelectiveCopyMode::Include,
             patterns: vec!["proxy".to_string()],
         };
-        assert!(passes_selective_filter(Path::new("clip_proxy.mov"), &filter));
+        assert!(passes_selective_filter(
+            Path::new("clip_proxy.mov"),
+            &filter
+        ));
         assert!(!passes_selective_filter(Path::new("clip.mov"), &filter));
     }
 
@@ -773,7 +825,10 @@ mod tests {
         let ignored = find_ignored_bundle_dirs(dir.path(), &rule);
 
         assert!(ignored.contains(&small_bundle));
-        assert!(!ignored.contains(&populated), "a populated bundle must not be silently skipped");
+        assert!(
+            !ignored.contains(&populated),
+            "a populated bundle must not be silently skipped"
+        );
     }
 
     #[test]

@@ -27,7 +27,13 @@ pub struct Preset {
 fn sanitize_filename(name: &str) -> String {
     name.trim()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -48,8 +54,7 @@ fn preset_file_path(dir: &Path, name: &str) -> io::Result<PathBuf> {
 pub fn save_preset_to_dir(dir: &Path, preset: &Preset) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let path = preset_file_path(dir, &preset.name)?;
-    let json = serde_json::to_string_pretty(preset)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+    let json = serde_json::to_string_pretty(preset).map_err(|e| io::Error::other(e.to_string()))?;
     fs::write(path, json)
 }
 
@@ -71,7 +76,7 @@ pub fn list_presets_from_dir(dir: &Path) -> io::Result<Vec<Preset>> {
             }
         }
     }
-    presets.sort_by(|a: &Preset, b: &Preset| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    presets.sort_by_key(|preset| preset.name.to_lowercase());
     Ok(presets)
 }
 
@@ -83,7 +88,7 @@ pub fn presets_dir<R: Runtime>(app_handle: &AppHandle<R>) -> io::Result<PathBuf>
     let base = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(base.join("presets"))
 }
 

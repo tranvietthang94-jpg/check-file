@@ -22,18 +22,13 @@ use crate::transfer_log::{self, TransferLogEntry};
 /// - `Source`: hash the source while streaming it (no extra read pass) and record it.
 /// - `SourceAndDestination`: additionally re-reads the destination afterwards and
 ///   compares its hash to the source hash, catching corruption introduced during write.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VerificationMode {
     Transfer,
     Source,
+    #[default]
     SourceAndDestination,
-}
-
-impl Default for VerificationMode {
-    fn default() -> Self {
-        VerificationMode::SourceAndDestination
-    }
 }
 
 pub const SCAN_EVENT: &str = "copy-scan";
@@ -62,6 +57,7 @@ fn should_retry_copy(attempt: u32, cancelled: bool) -> bool {
 /// read-only card, or the file still open elsewhere) is recorded rather than
 /// treated as a copy failure -- the destination copy is already good either way.
 fn try_move_delete_source(
+    source_root: &Path,
     absolute: &Path,
     relative_display: &str,
     algorithm: ChecksumAlgorithm,
@@ -74,6 +70,15 @@ fn try_move_delete_source(
         absolute.file_name().unwrap_or_default().to_string_lossy(),
         uuid::Uuid::new_v4()
     ));
+    if let Err(err) = crate::path_safety::revalidate_source(source_root, absolute)
+        .and_then(|()| crate::path_safety::revalidate_source(source_root, &quarantine))
+    {
+        move_delete_failed.push(FailedFile {
+            path: relative_display.to_string(),
+            message: format!("could not revalidate source before deletion: {err}"),
+        });
+        return;
+    }
     if let Err(err) = fs::rename(absolute, &quarantine) {
         move_delete_failed.push(FailedFile {
             path: relative_display.to_string(),
@@ -81,10 +86,18 @@ fn try_move_delete_source(
         });
         return;
     }
+    if let Err(err) = crate::path_safety::revalidate_source(source_root, &quarantine) {
+        let _ = restore_quarantined_source(source_root, &quarantine, absolute);
+        move_delete_failed.push(FailedFile {
+            path: relative_display.to_string(),
+            message: format!("could not revalidate secured source before deletion: {err}"),
+        });
+        return;
+    }
     match checksum::verify_file_hash(&quarantine, expected_checksum, algorithm) {
         Ok(true) => {}
         Ok(false) => {
-            let _ = fs::rename(&quarantine, absolute);
+            let _ = restore_quarantined_source(source_root, &quarantine, absolute);
             move_delete_failed.push(FailedFile {
                 path: relative_display.to_string(),
                 message: "source changed after verification; refusing to delete it".to_string(),
@@ -92,7 +105,7 @@ fn try_move_delete_source(
             return;
         }
         Err(err) => {
-            let _ = fs::rename(&quarantine, absolute);
+            let _ = restore_quarantined_source(source_root, &quarantine, absolute);
             move_delete_failed.push(FailedFile {
                 path: relative_display.to_string(),
                 message: format!("could not re-verify source before deletion: {err}"),
@@ -100,10 +113,18 @@ fn try_move_delete_source(
             return;
         }
     }
+    if let Err(err) = crate::path_safety::revalidate_source(source_root, &quarantine) {
+        let _ = restore_quarantined_source(source_root, &quarantine, absolute);
+        move_delete_failed.push(FailedFile {
+            path: relative_display.to_string(),
+            message: format!("could not revalidate secured source before removal: {err}"),
+        });
+        return;
+    }
     match fs::remove_file(&quarantine) {
         Ok(()) => deleted_source_files.push(relative_display.to_string()),
         Err(err) => {
-            let _ = fs::rename(&quarantine, absolute);
+            let _ = restore_quarantined_source(source_root, &quarantine, absolute);
             move_delete_failed.push(FailedFile {
                 path: relative_display.to_string(),
                 message: err.to_string(),
@@ -308,7 +329,10 @@ pub struct JobRegistry {
 impl JobRegistry {
     pub fn register(&self, job_id: String) -> Arc<AtomicBool> {
         let flag = Arc::new(AtomicBool::new(false));
-        self.cancel_flags.lock().unwrap().insert(job_id, flag.clone());
+        self.cancel_flags
+            .lock()
+            .unwrap()
+            .insert(job_id, flag.clone());
         self.sleep_guard.job_started();
         flag
     }
@@ -356,7 +380,8 @@ impl JobRegistry {
     /// (via `resolve_broken_media`) or `cancel_flag` fires while still
     /// waiting, in which case it returns `false` as if the user chose to abort.
     pub fn wait_for_broken_media_decision(&self, job_id: &str, cancel_flag: &AtomicBool) -> bool {
-        self.broken_media_gate.wait_for_decision(job_id, cancel_flag)
+        self.broken_media_gate
+            .wait_for_decision(job_id, cancel_flag)
     }
 
     /// Resolves a pending Broken Media alert: `true` continues the copy,
@@ -429,6 +454,7 @@ impl<'a> ProgressTracker<'a> {
 }
 
 fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
+    crate::path_safety::revalidate_source(source, source)?;
     if !source.exists() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -450,6 +476,7 @@ fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
     for entry in WalkDir::new(source).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             let absolute = entry.path().to_path_buf();
+            crate::path_safety::revalidate_source(source, &absolute)?;
             let relative = absolute
                 .strip_prefix(source)
                 .unwrap_or(&absolute)
@@ -474,6 +501,7 @@ fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
 fn scan_source_selection(selection: &SourceSelection) -> std::io::Result<Vec<FileEntry>> {
     let mut entries = Vec::new();
     for selected in selection.selected_paths() {
+        crate::path_safety::revalidate_source(selection.common_root(), selected)?;
         let metadata = fs::metadata(selected)?;
         if metadata.is_file() {
             entries.push(FileEntry {
@@ -495,6 +523,7 @@ fn scan_source_selection(selection: &SourceSelection) -> std::io::Result<Vec<Fil
 
         for entry in WalkDir::new(selected).follow_links(false) {
             let entry = entry.map_err(|error| std::io::Error::other(error.to_string()))?;
+            crate::path_safety::revalidate_source(selection.common_root(), entry.path())?;
             let metadata = fs::symlink_metadata(entry.path())?;
             if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
                 return Err(std::io::Error::new(
@@ -532,11 +561,13 @@ fn mirror_selected_directories(
     destination: &Path,
 ) -> std::io::Result<()> {
     for selected in selection.selected_paths() {
+        crate::path_safety::revalidate_source(selection.common_root(), selected)?;
         if !fs::metadata(selected)?.is_dir() {
             continue;
         }
         for entry in WalkDir::new(selected).follow_links(false) {
             let entry = entry.map_err(|error| std::io::Error::other(error.to_string()))?;
+            crate::path_safety::revalidate_source(selection.common_root(), entry.path())?;
             let metadata = fs::symlink_metadata(entry.path())?;
             if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
                 return Err(std::io::Error::new(
@@ -563,6 +594,7 @@ fn mirror_selected_directories(
                 continue;
             }
             let target = crate::path_safety::safe_destination(destination, relative)?;
+            crate::path_safety::revalidate_destination(destination, &target)?;
             fs::create_dir_all(&target)?;
             crate::path_safety::revalidate_destination(destination, &target)?;
         }
@@ -614,35 +646,67 @@ fn staging_path_for(dest_path: &Path, job_id: &str) -> PathBuf {
     dest_path.with_file_name(name)
 }
 
+struct CopyFilePaths<'a> {
+    source_root: &'a Path,
+    source: &'a Path,
+    destination_root: &'a Path,
+    staging: &'a Path,
+}
+
+#[derive(Clone, Copy)]
+struct CopyFileOptions<'a> {
+    relative_display: &'a str,
+    checksum_algorithm: ChecksumAlgorithm,
+    compute_hash: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    source_modified: SystemTime,
+}
+
+fn remove_staging_file(destination_root: &Path, staging_path: &Path) {
+    if crate::path_safety::revalidate_destination(destination_root, staging_path).is_ok() {
+        let _ = fs::remove_file(staging_path);
+    }
+}
+
+fn restore_quarantined_source(
+    source_root: &Path,
+    quarantine: &Path,
+    original: &Path,
+) -> std::io::Result<()> {
+    crate::path_safety::revalidate_source(source_root, quarantine)?;
+    crate::path_safety::revalidate_source(source_root, original)?;
+    fs::rename(quarantine, original)
+}
+
 /// Copies one file in fixed-size chunks (streaming, not loaded fully into RAM),
 /// checking the cancel flag between chunks and optionally hashing the source
 /// bytes as they're read (no extra I/O pass). Returns `Cancelled` if cancelled
 /// mid-file, in which case the partial destination file is removed so it can
 /// never be mistaken for a completed copy.
 fn copy_file_chunked(
-    src: &Path,
-    dst: &Path,
+    paths: CopyFilePaths<'_>,
     buffer: &mut [u8],
     cancel_flag: &AtomicBool,
     tracker: &mut ProgressTracker,
-    relative_display: &str,
-    checksum_algorithm: ChecksumAlgorithm,
-    compute_hash: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
-    source_modified: SystemTime,
+    options: CopyFileOptions<'_>,
 ) -> std::io::Result<CopyFileOutcome> {
-    let mut src_file = fs::File::open(src)?;
-    let dst_file = fs::File::create(dst)?;
-    let mut hasher = compute_hash.then(|| StreamingHasher::new(checksum_algorithm));
-    let mut legacy_hasher = compute_hash
-        .then_some(legacy_checksum_algorithm)
+    crate::path_safety::revalidate_source(paths.source_root, paths.source)?;
+    let mut src_file = fs::File::open(paths.source)?;
+    crate::path_safety::revalidate_destination(paths.destination_root, paths.staging)?;
+    let dst_file = fs::File::create(paths.staging)?;
+    let mut hasher = options
+        .compute_hash
+        .then(|| StreamingHasher::new(options.checksum_algorithm));
+    let mut legacy_hasher = options
+        .compute_hash
+        .then_some(options.legacy_checksum_algorithm)
         .flatten()
         .map(StreamingHasher::new);
 
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
             drop(dst_file);
-            let _ = fs::remove_file(dst);
+            remove_staging_file(paths.destination_root, paths.staging);
             return Ok(CopyFileOutcome::Cancelled);
         }
         let n = src_file.read(buffer)?;
@@ -656,7 +720,7 @@ fn copy_file_chunked(
         if let Some(h) = legacy_hasher.as_mut() {
             h.update(&buffer[..n]);
         }
-        tracker.add_bytes(n as u64, relative_display);
+        tracker.add_bytes(n as u64, options.relative_display);
     }
 
     // Mirror the source's modified time onto the destination. Without this,
@@ -664,13 +728,46 @@ fn copy_file_chunked(
     // duplicate detection (name + size + mtime) misfire as a rename on any
     // second offload of the same card instead of recognizing it as already
     // copied.
-    let _ = dst_file.set_modified(source_modified);
+    let _ = dst_file.set_modified(options.source_modified);
     dst_file.sync_all()?;
 
     Ok(CopyFileOutcome::Completed {
         source_hash: hasher.map(|h| h.finalize_hex()),
         legacy_hash: legacy_hasher.map(|h| h.finalize_hex()),
     })
+}
+
+#[derive(Clone, Copy)]
+pub struct CopyOptions<'a> {
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
+    source_name: &'a str,
+    organize: &'a OrganizeSettings,
+    move_after_transfer: bool,
+    move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+}
+
+impl<'a> CopyOptions<'a> {
+    pub fn new(
+        verification_mode: VerificationMode,
+        checksum_algorithm: ChecksumAlgorithm,
+        source_name: &'a str,
+        organize: &'a OrganizeSettings,
+        move_after_transfer: bool,
+        move_same_volume: bool,
+        legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    ) -> Self {
+        Self {
+            verification_mode,
+            checksum_algorithm,
+            source_name,
+            organize,
+            move_after_transfer,
+            move_same_volume,
+            legacy_checksum_algorithm,
+        }
+    }
 }
 
 /// Tauri-agnostic copy core: walks `source`, streams every file to the mirrored
@@ -682,13 +779,7 @@ pub fn run_copy_core(
     source: &Path,
     destination: &Path,
     cancel_flag: &AtomicBool,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-    source_name: &str,
-    organize: &OrganizeSettings,
-    move_after_transfer: bool,
-    move_same_volume: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    options: CopyOptions<'_>,
 ) -> CopyOutcome {
     run_copy_core_inner(
         sink,
@@ -697,13 +788,7 @@ pub fn run_copy_core(
         None,
         destination,
         cancel_flag,
-        verification_mode,
-        checksum_algorithm,
-        source_name,
-        organize,
-        move_after_transfer,
-        move_same_volume,
-        legacy_checksum_algorithm,
+        options,
     )
 }
 
@@ -713,13 +798,7 @@ pub fn run_copy_core_with_selection(
     selection: &SourceSelection,
     destination: &Path,
     cancel_flag: &AtomicBool,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-    source_name: &str,
-    organize: &OrganizeSettings,
-    move_after_transfer: bool,
-    move_same_volume: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    options: CopyOptions<'_>,
 ) -> CopyOutcome {
     run_copy_core_inner(
         sink,
@@ -728,17 +807,10 @@ pub fn run_copy_core_with_selection(
         Some(selection),
         destination,
         cancel_flag,
-        verification_mode,
-        checksum_algorithm,
-        source_name,
-        organize,
-        move_after_transfer,
-        move_same_volume,
-        legacy_checksum_algorithm,
+        options,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_copy_core_inner(
     sink: &dyn ProgressSink,
     job_id: String,
@@ -746,14 +818,17 @@ fn run_copy_core_inner(
     selection: Option<&SourceSelection>,
     destination: &Path,
     cancel_flag: &AtomicBool,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-    source_name: &str,
-    organize: &OrganizeSettings,
-    move_after_transfer: bool,
-    move_same_volume: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    options: CopyOptions<'_>,
 ) -> CopyOutcome {
+    let CopyOptions {
+        verification_mode,
+        checksum_algorithm,
+        source_name,
+        organize,
+        move_after_transfer,
+        move_same_volume,
+        legacy_checksum_algorithm,
+    } = options;
     let destination_root = fs::canonicalize(destination);
     if let Ok(destination_root) = &destination_root {
         let overlaps = match selection {
@@ -795,7 +870,9 @@ fn run_copy_core_inner(
     // the source/destination roots don't change mid-job.
     let same_volume_move_active = move_same_volume
         && crate::disks::volume_signature(&source.display().to_string())
-            .zip(crate::disks::volume_signature(&destination.display().to_string()))
+            .zip(crate::disks::volume_signature(
+                &destination.display().to_string(),
+            ))
             .is_some_and(|(a, b)| a == b);
     let mut entries = match selection.map_or_else(|| scan_source(source), scan_source_selection) {
         Ok(e) => e,
@@ -935,17 +1012,25 @@ fn run_copy_core_inner(
         };
         let organized_relative = organize::build_destination_path(&entry.relative, &ctx, organize);
 
-        let mut dest_path = match crate::path_safety::safe_destination(destination, &organized_relative) {
-            Ok(path) => path,
-            Err(err) => {
+        let mut dest_path =
+            match crate::path_safety::safe_destination(destination, &organized_relative) {
+                Ok(path) => path,
+                Err(err) => {
+                    failed_files.push(FailedFile {
+                        path: organized_relative.display().to_string(),
+                        message: err.to_string(),
+                    });
+                    continue;
+                }
+            };
+        if let Some(parent) = dest_path.parent() {
+            if let Err(err) = crate::path_safety::revalidate_destination(destination, parent) {
                 failed_files.push(FailedFile {
                     path: organized_relative.display().to_string(),
                     message: err.to_string(),
                 });
                 continue;
             }
-        };
-        if let Some(parent) = dest_path.parent() {
             if let Err(err) = fs::create_dir_all(parent) {
                 failed_files.push(FailedFile {
                     path: organized_relative.display().to_string(),
@@ -981,6 +1066,19 @@ fn run_copy_core_inner(
                 // can delete the source, prove the existing destination has
                 // identical bytes with the selected checksum.
                 if can_move {
+                    if let Err(err) = crate::path_safety::revalidate_source(source, &entry.absolute)
+                        .and_then(|()| {
+                            crate::path_safety::revalidate_destination(destination, &dest_path)
+                        })
+                    {
+                        failed_files.push(FailedFile {
+                            path: relative_display,
+                            message: format!(
+                                "could not revalidate existing copy before verification: {err}"
+                            ),
+                        });
+                        continue;
+                    }
                     let source_hash = checksum::hash_file(&entry.absolute, checksum_algorithm);
                     let destination_hash = checksum::hash_file(&dest_path, checksum_algorithm);
                     match (source_hash, destination_hash) {
@@ -1007,6 +1105,7 @@ fn run_copy_core_inner(
                                 legacy_algorithm: None,
                             });
                             try_move_delete_source(
+                                source,
                                 &entry.absolute,
                                 &relative_display,
                                 checksum_algorithm,
@@ -1091,6 +1190,13 @@ fn run_copy_core_inner(
             // checksum -- only the write side skips the redundant
             // copy-then-delete dance a cross-volume Move needs.
             let (hash, legacy_hash) = if compute_hash_for_this_file {
+                if let Err(err) = crate::path_safety::revalidate_source(source, &entry.absolute) {
+                    failed_files.push(FailedFile {
+                        path: copy_display.clone(),
+                        message: format!("could not revalidate file before hashing: {err}"),
+                    });
+                    continue;
+                }
                 match checksum::hash_file_dual(
                     &entry.absolute,
                     checksum_algorithm,
@@ -1108,7 +1214,9 @@ fn run_copy_core_inner(
             } else {
                 (known_hash.clone(), None)
             };
-            if let Err(err) = crate::path_safety::revalidate_destination(destination, &dest_path) {
+            if let Err(err) = crate::path_safety::revalidate_source(source, &entry.absolute)
+                .and_then(|()| crate::path_safety::revalidate_destination(destination, &dest_path))
+            {
                 failed_files.push(FailedFile {
                     path: copy_display,
                     message: err.to_string(),
@@ -1160,16 +1268,22 @@ fn run_copy_core_inner(
             // bytes from the doomed attempt.
             let bytes_before_attempt = tracker.bytes_copied;
             let result = copy_file_chunked(
-                &entry.absolute,
-                &staging_path,
+                CopyFilePaths {
+                    source_root: source,
+                    source: &entry.absolute,
+                    destination_root: destination,
+                    staging: &staging_path,
+                },
                 &mut buffer,
                 cancel_flag,
                 &mut tracker,
-                &copy_display,
-                checksum_algorithm,
-                compute_hash_for_this_file,
-                legacy_checksum_algorithm,
-                entry.modified,
+                CopyFileOptions {
+                    relative_display: &copy_display,
+                    checksum_algorithm,
+                    compute_hash: compute_hash_for_this_file,
+                    legacy_checksum_algorithm,
+                    source_modified: entry.modified,
+                },
             );
             if result.is_err() && should_retry_copy(attempt, cancel_flag.load(Ordering::SeqCst)) {
                 tracker.bytes_copied = bytes_before_attempt;
@@ -1181,7 +1295,10 @@ fn run_copy_core_inner(
         };
 
         match copy_result {
-            Ok(CopyFileOutcome::Completed { source_hash, legacy_hash }) => {
+            Ok(CopyFileOutcome::Completed {
+                source_hash,
+                legacy_hash,
+            }) => {
                 tracker.finish_file();
                 // Falls back to the MHL-Awareness checksum when this file's
                 // hashing was skipped because it was already known-good.
@@ -1203,6 +1320,18 @@ fn run_copy_core_inner(
                 // final `dest_path` name until this check passes.
                 let verified_ok = if let Some(hash) = &source_hash {
                     if verification_mode == VerificationMode::SourceAndDestination {
+                        if let Err(err) =
+                            crate::path_safety::revalidate_destination(destination, &staging_path)
+                        {
+                            failed_files.push(FailedFile {
+                                path: copy_display.clone(),
+                                message: format!(
+                                    "could not revalidate destination for verification: {err}"
+                                ),
+                            });
+                            remove_staging_file(destination, &staging_path);
+                            continue;
+                        }
                         match checksum::verify_file_hash(&staging_path, hash, checksum_algorithm) {
                             Ok(true) => true,
                             Ok(false) => {
@@ -1234,12 +1363,17 @@ fn run_copy_core_inner(
                 };
 
                 if verified_ok {
-                    if let Err(err) = crate::path_safety::revalidate_destination(destination, &dest_path) {
+                    if let Err(err) =
+                        crate::path_safety::revalidate_destination(destination, &staging_path)
+                            .and_then(|()| {
+                                crate::path_safety::revalidate_destination(destination, &dest_path)
+                            })
+                    {
                         failed_files.push(FailedFile {
                             path: copy_display.clone(),
                             message: err.to_string(),
                         });
-                        let _ = fs::remove_file(&staging_path);
+                        remove_staging_file(destination, &staging_path);
                         continue;
                     }
                     match fs::rename(&staging_path, &dest_path) {
@@ -1250,13 +1384,16 @@ fn run_copy_core_inner(
                                     checksum: hash.clone(),
                                     algorithm: checksum_algorithm,
                                     legacy_checksum: legacy_hash.clone(),
-                                    legacy_algorithm: legacy_hash.as_ref().and(legacy_checksum_algorithm),
+                                    legacy_algorithm: legacy_hash
+                                        .as_ref()
+                                        .and(legacy_checksum_algorithm),
                                 });
                                 mhl_checksum = Some(hash.clone());
                             }
                             if can_move {
                                 if let Some(hash) = &source_hash {
                                     try_move_delete_source(
+                                        source,
                                         &entry.absolute,
                                         &copy_display,
                                         checksum_algorithm,
@@ -1270,14 +1407,16 @@ fn run_copy_core_inner(
                         Err(err) => {
                             failed_files.push(FailedFile {
                                 path: copy_display.clone(),
-                                message: format!("copied file could not be moved into place: {err}"),
+                                message: format!(
+                                    "copied file could not be moved into place: {err}"
+                                ),
                             });
                             record_in_mhl = false;
-                            let _ = fs::remove_file(&staging_path);
+                            remove_staging_file(destination, &staging_path);
                         }
                     }
                 } else {
-                    let _ = fs::remove_file(&staging_path);
+                    remove_staging_file(destination, &staging_path);
                 }
 
                 if record_in_mhl {
@@ -1302,7 +1441,7 @@ fn run_copy_core_inner(
                 // final `dest_path` name to worry about, but the staging
                 // file it was writing into could still be sitting there
                 // partially written.
-                let _ = fs::remove_file(&staging_path);
+                remove_staging_file(destination, &staging_path);
                 failed_files.push(FailedFile {
                     path: copy_display,
                     message: if attempt > 1 {
@@ -1415,23 +1554,51 @@ impl<'a, R: Runtime> ProgressSink for TauriProgressSink<'a, R> {
 /// `copy-cancelled` event. Intended to run on its own thread. Returns the
 /// outcome so callers orchestrating multiple jobs (e.g. cascading transfers)
 /// can decide whether to proceed based on how this one went.
-pub fn run_copy_job<R: Runtime>(
-    app_handle: AppHandle<R>,
-    job_id: String,
-    source: PathBuf,
-    source_selection: Option<SourceSelection>,
-    destination: PathBuf,
-    cancel_flag: Arc<AtomicBool>,
-    verification_mode: VerificationMode,
-    checksum_algorithm: ChecksumAlgorithm,
-    source_name: String,
-    organize: OrganizeSettings,
-    move_after_transfer: bool,
-    move_same_volume: bool,
-    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
-    save_log_to_destination: bool,
-    create_per_file_mhl: bool,
-) -> CopyOutcome {
+#[derive(Clone)]
+pub struct TransferOptions {
+    pub verification_mode: VerificationMode,
+    pub checksum_algorithm: ChecksumAlgorithm,
+    pub source_name: String,
+    pub organize: OrganizeSettings,
+    pub move_after_transfer: bool,
+    pub move_same_volume: bool,
+    pub legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+    pub save_log_to_destination: bool,
+    pub create_per_file_mhl: bool,
+}
+
+impl TransferOptions {
+    fn copy_options(&self) -> CopyOptions<'_> {
+        CopyOptions::new(
+            self.verification_mode,
+            self.checksum_algorithm,
+            &self.source_name,
+            &self.organize,
+            self.move_after_transfer,
+            self.move_same_volume,
+            self.legacy_checksum_algorithm,
+        )
+    }
+}
+
+pub struct CopyJobRequest {
+    pub job_id: String,
+    pub source: PathBuf,
+    pub source_selection: Option<SourceSelection>,
+    pub destination: PathBuf,
+    pub cancel_flag: Arc<AtomicBool>,
+    pub options: TransferOptions,
+}
+
+pub fn run_copy_job<R: Runtime>(app_handle: AppHandle<R>, request: CopyJobRequest) -> CopyOutcome {
+    let CopyJobRequest {
+        job_id,
+        source,
+        source_selection,
+        destination,
+        cancel_flag,
+        options,
+    } = request;
     let sink = TauriProgressSink {
         app_handle: &app_handle,
         job_id: job_id.clone(),
@@ -1445,13 +1612,7 @@ pub fn run_copy_job<R: Runtime>(
             selection,
             &destination,
             &cancel_flag,
-            verification_mode,
-            checksum_algorithm,
-            &source_name,
-            &organize,
-            move_after_transfer,
-            move_same_volume,
-            legacy_checksum_algorithm,
+            options.copy_options(),
         ),
         None => run_copy_core(
             &sink,
@@ -1459,13 +1620,7 @@ pub fn run_copy_job<R: Runtime>(
             &source,
             &destination,
             &cancel_flag,
-            verification_mode,
-            checksum_algorithm,
-            &source_name,
-            &organize,
-            move_after_transfer,
-            move_same_volume,
-            legacy_checksum_algorithm,
+            options.copy_options(),
         ),
     };
     let finished_at = SystemTime::now();
@@ -1479,17 +1634,17 @@ pub fn run_copy_job<R: Runtime>(
         .flatten()
         .map(|p| p.display().to_string());
 
-    if create_per_file_mhl {
+    if options.create_per_file_mhl {
         mhl::write_per_file_mhls(&destination, &outcome.mhl_entries, started_at, finished_at);
     }
 
     let log_entry = TransferLogEntry {
         job_id: job_id.clone(),
-        source_name,
+        source_name: options.source_name.clone(),
         source: source.display().to_string(),
         destination: destination.display().to_string(),
-        verification_mode,
-        checksum_algorithm,
+        verification_mode: options.verification_mode,
+        checksum_algorithm: options.checksum_algorithm,
         started_at: mhl::iso8601(started_at),
         finished_at: mhl::iso8601(finished_at),
         files_copied: outcome.files_copied,
@@ -1509,7 +1664,7 @@ pub fn run_copy_job<R: Runtime>(
     // OffShoot's "Include Transfer Logs ... on Destination" -- the JSON log
     // is always saved locally (above); this additionally drops a copy at
     // the destination root, mirroring where the MHL already always lands.
-    if save_log_to_destination {
+    if options.save_log_to_destination {
         let _ = transfer_log::save_log_to_dir(&destination, &log_entry);
     }
 
@@ -1553,6 +1708,23 @@ mod tests {
         fn on_progress(&self, _payload: ProgressPayload) {}
     }
 
+    struct SwapSelectedFileForLinkOnScan {
+        selected_file: PathBuf,
+        outside_file: PathBuf,
+    }
+
+    impl ProgressSink for SwapSelectedFileForLinkOnScan {
+        fn on_scan(&self, _total_files: u64, _total_bytes: u64) {
+            fs::remove_file(&self.selected_file).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&self.outside_file, &self.selected_file).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_file(&self.outside_file, &self.selected_file).unwrap();
+        }
+
+        fn on_progress(&self, _payload: ProgressPayload) {}
+    }
+
     #[test]
     fn overlapping_source_and_destination_are_rejected_without_deleting_source() {
         let root = tempfile::tempdir().unwrap();
@@ -1566,13 +1738,15 @@ mod tests {
             root.path(),
             root.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "CARD",
-            &OrganizeSettings::default(),
-            true,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "CARD",
+                &OrganizeSettings::default(),
+                true,
+                false,
+                None,
+            ),
         );
 
         assert!(source_file.exists());
@@ -1588,8 +1762,11 @@ mod tests {
         fs::write(dir.path().join("inside.mov"), b"copy me").unwrap();
 
         #[cfg(unix)]
-        std::os::unix::fs::symlink(outside.path().join("outside.mov"), dir.path().join("link.mov"))
-            .unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("outside.mov"),
+            dir.path().join("link.mov"),
+        )
+        .unwrap();
         #[cfg(windows)]
         std::os::windows::fs::symlink_file(
             outside.path().join("outside.mov"),
@@ -1625,13 +1802,15 @@ mod tests {
             &selection,
             dst_dir.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Selection",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Selection",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1657,10 +1836,11 @@ mod tests {
         let selected = src_dir.path().join("selected");
         fs::create_dir_all(selected.join("empty").join("nested")).unwrap();
         fs::create_dir_all(src_dir.path().join("unselected").join("empty")).unwrap();
-        let selection =
-            SourceSelection::new(src_dir.path().to_path_buf(), vec![selected]).unwrap();
-        let mut organize = OrganizeSettings::default();
-        organize.ignore_empty_folders = false;
+        let selection = SourceSelection::new(src_dir.path().to_path_buf(), vec![selected]).unwrap();
+        let organize = OrganizeSettings {
+            ignore_empty_folders: false,
+            ..OrganizeSettings::default()
+        };
 
         let outcome = run_copy_core_with_selection(
             &NoopSink,
@@ -1668,13 +1848,15 @@ mod tests {
             &selection,
             dst_dir.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Selection",
-            &organize,
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Selection",
+                &organize,
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -1695,11 +1877,8 @@ mod tests {
         fs::create_dir_all(&selected).unwrap();
         fs::create_dir_all(&destination).unwrap();
         fs::write(selected.join("clip.mov"), b"footage").unwrap();
-        let selection = SourceSelection::new(
-            root.path().to_path_buf(),
-            vec![selected.clone()],
-        )
-        .unwrap();
+        let selection =
+            SourceSelection::new(root.path().to_path_buf(), vec![selected.clone()]).unwrap();
 
         let outcome = run_copy_core_with_selection(
             &NoopSink,
@@ -1707,17 +1886,22 @@ mod tests {
             &selection,
             &destination,
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Selection",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Selection",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
-        assert_eq!(fs::read(destination.join("CARD_A").join("clip.mov")).unwrap(), b"footage");
+        assert_eq!(
+            fs::read(destination.join("CARD_A").join("clip.mov")).unwrap(),
+            b"footage"
+        );
         assert!(selected.join("clip.mov").exists());
     }
 
@@ -1729,12 +1913,8 @@ mod tests {
         fs::create_dir_all(nested.parent().unwrap()).unwrap();
         fs::write(&nested, b"clip").unwrap();
 
-        let selection = SourceSelection::from_paths(vec![
-            folder.clone(),
-            nested,
-            folder.clone(),
-        ])
-        .unwrap();
+        let selection =
+            SourceSelection::from_paths(vec![folder.clone(), nested, folder.clone()]).unwrap();
 
         assert_eq!(selection.common_root(), src_dir.path());
         assert_eq!(selection.selected_paths(), &[folder]);
@@ -1749,14 +1929,11 @@ mod tests {
         fs::write(&inside, b"inside").unwrap();
         fs::write(&outside_file, b"outside").unwrap();
 
-        let outside_error = SourceSelection::new(
-            root.path().to_path_buf(),
-            vec![outside_file],
-        )
-        .unwrap_err();
+        let outside_error =
+            SourceSelection::new(root.path().to_path_buf(), vec![outside_file]).unwrap_err();
         let traversal = root.path().join("folder").join("..").join("inside.mov");
-        let traversal_error = SourceSelection::new(root.path().to_path_buf(), vec![traversal])
-            .unwrap_err();
+        let traversal_error =
+            SourceSelection::new(root.path().to_path_buf(), vec![traversal]).unwrap_err();
 
         assert!(outside_error.to_string().contains("common root"));
         assert!(traversal_error.to_string().contains("parent"));
@@ -1779,6 +1956,47 @@ mod tests {
         let error = SourceSelection::from_paths(vec![selected]).unwrap_err();
 
         assert!(error.to_string().contains("link") || error.to_string().contains("reparse"));
+    }
+
+    #[test]
+    fn selected_file_replaced_by_link_after_scan_is_not_copied() {
+        let source = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let selected_file = source.path().join("clip.mov");
+        let outside_file = outside.path().join("outside.mov");
+        fs::write(&selected_file, b"selected bytes").unwrap();
+        fs::write(&outside_file, b"outside bytes").unwrap();
+        let selection = SourceSelection::from_paths(vec![selected_file.clone()]).unwrap();
+        let sink = SwapSelectedFileForLinkOnScan {
+            selected_file,
+            outside_file,
+        };
+
+        let outcome = run_copy_core_with_selection(
+            &sink,
+            "selected-link-swap".to_string(),
+            &selection,
+            destination.path(),
+            &AtomicBool::new(false),
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "CARD",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
+        );
+
+        assert_eq!(outcome.files_copied, 0);
+        assert_eq!(outcome.failed_files.len(), 1);
+        assert!(!destination.path().join("clip.mov").exists());
+        assert!(!destination
+            .path()
+            .join("clip.mov.selected-link-swap.ofkit-partial")
+            .exists());
     }
 
     #[test]
@@ -1815,13 +2033,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(!outcome.cancelled);
@@ -1829,7 +2049,10 @@ mod tests {
         assert!(outcome.failed_files.is_empty());
         assert_eq!(outcome.bytes_copied, 11 + 5000);
 
-        assert_eq!(fs::read(dst_dir.path().join("a.txt")).unwrap(), b"hello world");
+        assert_eq!(
+            fs::read(dst_dir.path().join("a.txt")).unwrap(),
+            b"hello world"
+        );
         assert_eq!(
             fs::read(dst_dir.path().join("nested").join("b.bin")).unwrap(),
             vec![7u8; 5000]
@@ -1884,13 +2107,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.missing_files.is_empty());
@@ -1909,13 +2134,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.cancelled);
@@ -1940,13 +2167,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.cancelled);
@@ -1982,13 +2211,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2022,9 +2253,16 @@ mod tests {
             checksum: Some("0000000000000000".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
-            legacy_checksum: None, legacy_algorithm: None,
+            legacy_checksum: None,
+            legacy_algorithm: None,
         };
-        mhl::write_mhl(src_dir.path(), &[bogus_entry], SystemTime::now(), SystemTime::now()).unwrap();
+        mhl::write_mhl(
+            src_dir.path(),
+            &[bogus_entry],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap();
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -2033,13 +2271,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         // `write_mhl` drops the source MHL directly into `src_dir`, so the
@@ -2049,7 +2289,10 @@ mod tests {
         assert_eq!(outcome.failed_files.len(), 1);
         assert_eq!(outcome.failed_files[0].path, "clip.mov");
         assert!(!outcome.verified_files.iter().any(|f| f.path == "clip.mov"));
-        assert!(!outcome.mhl_entries.iter().any(|e| e.relative_path == "clip.mov"));
+        assert!(!outcome
+            .mhl_entries
+            .iter()
+            .any(|e| e.relative_path == "clip.mov"));
         assert!(
             !dst_dir.path().join("clip.mov").exists(),
             "an unverified copy must never be renamed into its final, trusted-looking name"
@@ -2071,13 +2314,15 @@ mod tests {
             Path::new("Z:\\this\\path\\does\\not\\exist"),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.files_copied, 0);
@@ -2110,13 +2355,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         // The final flush always emits at least one progress event.
@@ -2138,13 +2385,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(!outcome.cancelled);
@@ -2168,13 +2417,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Source,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Source,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2199,13 +2450,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Md5,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Md5,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2231,13 +2484,15 @@ mod tests {
                 src_dir.path(),
                 dst_dir.path(),
                 cancel,
-                VerificationMode::Transfer,
-                ChecksumAlgorithm::Xxh64,
-                "Source",
-                &OrganizeSettings::default(),
-                false,
-                false, // move_same_volume
-                None, // legacy_checksum_algorithm
+                crate::copy_engine::CopyOptions::new(
+                    VerificationMode::Transfer,
+                    ChecksumAlgorithm::Xxh64,
+                    "Source",
+                    &OrganizeSettings::default(),
+                    false,
+                    false,
+                    None,
+                ),
             )
         };
 
@@ -2265,7 +2520,10 @@ mod tests {
         let dst_path = dst_dir.path().join("clip.mov");
         fs::write(&src_path, b"SOURCE-CONTENT").unwrap();
         fs::write(&dst_path, b"DESTIN-CONTENT").unwrap();
-        assert_eq!(fs::metadata(&src_path).unwrap().len(), fs::metadata(&dst_path).unwrap().len());
+        assert_eq!(
+            fs::metadata(&src_path).unwrap().len(),
+            fs::metadata(&dst_path).unwrap().len()
+        );
         let source_modified = fs::metadata(&src_path).unwrap().modified().unwrap();
         fs::OpenOptions::new()
             .write(true)
@@ -2280,13 +2538,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            true,
-            false,
-            None,
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                true,
+                false,
+                None,
+            ),
         );
 
         assert!(!src_path.exists(), "Move may delete the source only after the different bytes were copied and verified under a new name");
@@ -2294,7 +2554,10 @@ mod tests {
         assert!(outcome.skipped_files.is_empty());
         assert_eq!(outcome.deleted_source_files, vec!["clip 2.mov".to_string()]);
         assert_eq!(outcome.renamed_files.len(), 1);
-        assert_eq!(fs::read(dst_dir.path().join("clip 2.mov")).unwrap(), b"SOURCE-CONTENT");
+        assert_eq!(
+            fs::read(dst_dir.path().join("clip 2.mov")).unwrap(),
+            b"SOURCE-CONTENT"
+        );
     }
 
     #[test]
@@ -2304,7 +2567,11 @@ mod tests {
 
         // Two different cards that both start clip numbering at C0001.mp4.
         fs::write(src_dir.path().join("C0001.mp4"), b"card A footage").unwrap();
-        fs::write(dst_dir.path().join("C0001.mp4"), b"card B footage, already offloaded").unwrap();
+        fs::write(
+            dst_dir.path().join("C0001.mp4"),
+            b"card B footage, already offloaded",
+        )
+        .unwrap();
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -2313,13 +2580,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2366,13 +2635,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         let dest_modified = fs::metadata(dst_dir.path().join("clip.mp4"))
@@ -2394,9 +2665,11 @@ mod tests {
         let dst_dir = tempfile::tempdir().unwrap();
         fs::write(src_dir.path().join("C0001.MP4"), b"footage").unwrap();
 
-        let mut organize = OrganizeSettings::default();
-        organize.rename_template = Some("{Source Name}_{File Counter}".to_string());
-        organize.folder_template = Some("{File Extension}".to_string());
+        let organize = OrganizeSettings {
+            rename_template: Some("{Source Name}_{File Counter}".to_string()),
+            folder_template: Some("{File Extension}".to_string()),
+            ..OrganizeSettings::default()
+        };
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -2405,13 +2678,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "A-Cam",
-            &organize,
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "A-Cam",
+                &organize,
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2441,13 +2716,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &organize,
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &organize,
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -2478,13 +2755,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &organize,
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &organize,
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -2501,7 +2780,9 @@ mod tests {
         fs::write(src_dir.path().join("Thumbs.db"), b"thumbnail cache").unwrap();
         fs::create_dir_all(src_dir.path().join("System Volume Information")).unwrap();
         fs::write(
-            src_dir.path().join("System Volume Information/IndexerVolumeGuid"),
+            src_dir
+                .path()
+                .join("System Volume Information/IndexerVolumeGuid"),
             b"junk",
         )
         .unwrap();
@@ -2513,13 +2794,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.files_copied, 1);
@@ -2542,13 +2825,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -2573,13 +2858,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            Some(ChecksumAlgorithm::Sha1), // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                Some(ChecksumAlgorithm::Sha1),
+            ),
         );
 
         let expected_legacy = checksum::hash_file(&src_file, ChecksumAlgorithm::Sha1).unwrap();
@@ -2613,13 +2900,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.mhl_entries.len(), 1);
@@ -2648,9 +2937,16 @@ mod tests {
             checksum: Some("deadbeefdeadbeef".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
-            legacy_checksum: None, legacy_algorithm: None,
+            legacy_checksum: None,
+            legacy_algorithm: None,
         };
-        mhl::write_mhl(src_dir.path(), &[fake_entry], SystemTime::now(), SystemTime::now()).unwrap();
+        mhl::write_mhl(
+            src_dir.path(),
+            &[fake_entry],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap();
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -2659,13 +2955,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Source,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Source,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2697,9 +2995,16 @@ mod tests {
             checksum: Some("deadbeefdeadbeef".to_string()),
             algorithm: ChecksumAlgorithm::Xxh64,
             hashed_at: SystemTime::now(),
-            legacy_checksum: None, legacy_algorithm: None,
+            legacy_checksum: None,
+            legacy_algorithm: None,
         };
-        mhl::write_mhl(src_dir.path(), &[stale_entry], SystemTime::now(), SystemTime::now()).unwrap();
+        mhl::write_mhl(
+            src_dir.path(),
+            &[stale_entry],
+            SystemTime::now(),
+            SystemTime::now(),
+        )
+        .unwrap();
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -2708,13 +3013,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Source,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Source,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         let clip_verification = outcome
@@ -2740,6 +3047,7 @@ mod tests {
         let mut failed = Vec::new();
 
         try_move_delete_source(
+            dir.path(),
             &source,
             "clip.mov",
             ChecksumAlgorithm::Xxh64,
@@ -2767,19 +3075,24 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            true,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                true,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
         assert_eq!(outcome.deleted_source_files, vec!["clip.mp4".to_string()]);
         assert!(outcome.move_delete_failed.is_empty());
-        assert!(!src_file.exists(), "the source copy should be gone once verified");
+        assert!(
+            !src_file.exists(),
+            "the source copy should be gone once verified"
+        );
         assert_eq!(
             fs::read(dst_dir.path().join("clip.mp4")).unwrap(),
             b"camera footage",
@@ -2804,17 +3117,22 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Source,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            true, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Source,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                true,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
-        assert!(!src_file.exists(), "the source file should have been renamed away");
+        assert!(
+            !src_file.exists(),
+            "the source file should have been renamed away"
+        );
         assert_eq!(outcome.deleted_source_files, vec!["clip.mp4".to_string()]);
         assert_eq!(
             fs::read(dst_dir.path().join("clip.mp4")).unwrap(),
@@ -2822,7 +3140,13 @@ mod tests {
         );
         assert_eq!(
             outcome.verified_files.first().map(|f| &f.checksum),
-            Some(&checksum::hash_file(dst_dir.path().join("clip.mp4").as_path(), ChecksumAlgorithm::Xxh64).unwrap()),
+            Some(
+                &checksum::hash_file(
+                    dst_dir.path().join("clip.mp4").as_path(),
+                    ChecksumAlgorithm::Xxh64
+                )
+                .unwrap()
+            ),
             "a checksum should still be recorded even though the write side was a rename"
         );
     }
@@ -2841,13 +3165,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Source,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Source,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.failed_files.is_empty());
@@ -2875,17 +3201,22 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            true,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                true,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.deleted_source_files.is_empty());
-        assert!(src_file.exists(), "Transfer mode gives no verification to delete on");
+        assert!(
+            src_file.exists(),
+            "Transfer mode gives no verification to delete on"
+        );
     }
 
     #[test]
@@ -2902,13 +3233,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &AtomicBool::new(false),
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
         assert!(src_file.exists());
 
@@ -2921,13 +3254,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            true,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                true,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.skipped_files.len(), 1);
@@ -2951,13 +3286,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.broken_media_files, vec!["dropped.mp4".to_string()]);
@@ -2989,13 +3326,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                false,
+                false,
+                None,
+            ),
         );
 
         assert!(outcome.cancelled);
@@ -3022,8 +3361,10 @@ mod tests {
         let dst_dir = tempfile::tempdir().unwrap();
         fs::write(src_dir.path().join("dropped.mp4"), b"").unwrap();
 
-        let mut organize = OrganizeSettings::default();
-        organize.auto_continue_on_broken_media = true;
+        let organize = OrganizeSettings {
+            auto_continue_on_broken_media: true,
+            ..OrganizeSettings::default()
+        };
 
         let cancel_flag = AtomicBool::new(false);
         let outcome = run_copy_core(
@@ -3032,13 +3373,15 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &cancel_flag,
-            VerificationMode::Transfer,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &organize,
-            false,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::Transfer,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &organize,
+                false,
+                false,
+                None,
+            ),
         );
 
         // Still recorded for the transfer log/report even though nobody was asked.
@@ -3065,17 +3408,22 @@ mod tests {
             src_dir.path(),
             dst_dir.path(),
             &AtomicBool::new(false),
-            VerificationMode::SourceAndDestination,
-            ChecksumAlgorithm::Xxh64,
-            "Source",
-            &OrganizeSettings::default(),
-            true,
-            false, // move_same_volume
-            None, // legacy_checksum_algorithm
+            crate::copy_engine::CopyOptions::new(
+                VerificationMode::SourceAndDestination,
+                ChecksumAlgorithm::Xxh64,
+                "Source",
+                &OrganizeSettings::default(),
+                true,
+                false,
+                None,
+            ),
         );
 
         assert_eq!(outcome.failed_files.len(), 1);
         assert!(outcome.deleted_source_files.is_empty());
-        assert!(src_file.exists(), "a failed copy must never delete the only remaining copy");
+        assert!(
+            src_file.exists(),
+            "a failed copy must never delete the only remaining copy"
+        );
     }
 }

@@ -56,7 +56,11 @@ fn format_bytes(bytes: u64) -> String {
 
 fn format_timestamp(iso: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(iso)
-        .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string())
+        .map(|dt| {
+            dt.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_else(|_| iso.to_string())
 }
 
@@ -203,16 +207,28 @@ fn verification_label(e: &TransferLogEntry) -> &'static str {
 fn render_issue_summary(e: &TransferLogEntry) -> String {
     let mut parts = Vec::new();
     if !e.failed_files.is_empty() {
-        parts.push(format!(r#"<span class="badge badge-failed">{} failed</span>"#, e.failed_files.len()));
+        parts.push(format!(
+            r#"<span class="badge badge-failed">{} failed</span>"#,
+            e.failed_files.len()
+        ));
     }
     if !e.skipped_files.is_empty() {
-        parts.push(format!(r#"<span class="badge">{} skipped</span>"#, e.skipped_files.len()));
+        parts.push(format!(
+            r#"<span class="badge">{} skipped</span>"#,
+            e.skipped_files.len()
+        ));
     }
     if !e.renamed_files.is_empty() {
-        parts.push(format!(r#"<span class="badge">{} renamed</span>"#, e.renamed_files.len()));
+        parts.push(format!(
+            r#"<span class="badge">{} renamed</span>"#,
+            e.renamed_files.len()
+        ));
     }
     if !e.deleted_source_files.is_empty() {
-        parts.push(format!(r#"<span class="badge">{} moved</span>"#, e.deleted_source_files.len()));
+        parts.push(format!(
+            r#"<span class="badge">{} moved</span>"#,
+            e.deleted_source_files.len()
+        ));
     }
     if !e.move_delete_failed.is_empty() {
         parts.push(format!(
@@ -353,7 +369,9 @@ fn render_clips_section(entries: &[TransferLogEntry], cache_dir: Option<&Path>) 
     if cards.is_empty() {
         String::new()
     } else {
-        format!(r#"<section class="clips"><h2>Clips</h2><div class="clip-grid">{cards}</div></section>"#)
+        format!(
+            r#"<section class="clips"><h2>Clips</h2><div class="clip-grid">{cards}</div></section>"#
+        )
     }
 }
 
@@ -408,7 +426,10 @@ pub fn generate_report_html(
     let notes = if request.notes.trim().is_empty() {
         String::new()
     } else {
-        format!(r#"<p class="notes">{}</p>"#, escape_html(request.notes.trim()))
+        format!(
+            r#"<p class="notes">{}</p>"#,
+            escape_html(request.notes.trim())
+        )
     };
     let generated = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
@@ -453,7 +474,7 @@ pub fn reports_dir<R: Runtime>(app_handle: &AppHandle<R>) -> io::Result<PathBuf>
     let base = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(base.join("reports"))
 }
 
@@ -484,7 +505,9 @@ pub fn save_report<R: Runtime>(
 mod tests {
     use super::*;
     use crate::checksum::ChecksumAlgorithm;
-    use crate::copy_engine::{FailedFile, RenamedFile, SkippedFile, VerificationMode, VerifiedFile};
+    use crate::copy_engine::{
+        FailedFile, RenamedFile, SkippedFile, VerificationMode, VerifiedFile,
+    };
 
     fn sample_entry(job_id: &str, source: &str, destination: &str) -> TransferLogEntry {
         TransferLogEntry {
@@ -503,7 +526,8 @@ mod tests {
                 path: "C0001.MP4".to_string(),
                 checksum: "abc".to_string(),
                 algorithm: ChecksumAlgorithm::Xxh64,
-                legacy_checksum: None, legacy_algorithm: None,
+                legacy_checksum: None,
+                legacy_algorithm: None,
             }],
             skipped_files: Vec::new(),
             renamed_files: Vec::new(),
@@ -594,7 +618,9 @@ mod tests {
     #[test]
     fn renamed_and_skipped_files_are_listed_in_the_files_section() {
         let mut entry = sample_entry("job-1", "G:\\", "D:\\Offload");
-        entry.skipped_files.push(SkippedFile { path: "C0003.MP4".to_string() });
+        entry.skipped_files.push(SkippedFile {
+            path: "C0003.MP4".to_string(),
+        });
         entry.renamed_files.push(RenamedFile {
             original_path: "C0004.MP4".to_string(),
             renamed_to: "C0004_1.MP4".to_string(),
@@ -658,11 +684,16 @@ mod tests {
             path: "C0001.MP4".to_string(),
             checksum: "x".to_string(),
             algorithm: ChecksumAlgorithm::Xxh64,
-            legacy_checksum: None, legacy_algorithm: None,
+            legacy_checksum: None,
+            legacy_algorithm: None,
         }];
         b.verified_files = a.verified_files.clone();
         let entries = [a, b];
         let refs = clip_refs(&entries);
-        assert_eq!(refs.len(), 1, "same destination+path across two logs should only produce one clip");
+        assert_eq!(
+            refs.len(),
+            1,
+            "same destination+path across two logs should only produce one clip"
+        );
     }
 }

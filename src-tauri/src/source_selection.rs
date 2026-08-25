@@ -114,7 +114,10 @@ fn normalize_selected_paths(paths: Vec<PathBuf>) -> io::Result<Vec<PathBuf>> {
         if !metadata.is_file() && !metadata.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("selected path is not a file or directory: {}", path.display()),
+                format!(
+                    "selected path is not a file or directory: {}",
+                    path.display()
+                ),
             ));
         }
         reject_linked_ancestors(&path)?;
@@ -159,7 +162,10 @@ fn validate_absolute_path(path: &Path, label: &str) -> io::Result<()> {
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{label} cannot contain parent traversal: {}", path.display()),
+            format!(
+                "{label} cannot contain parent traversal: {}",
+                path.display()
+            ),
         ));
     }
     Ok(())

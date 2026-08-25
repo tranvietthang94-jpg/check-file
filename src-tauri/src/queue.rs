@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 
 /// Controls how many transfer jobs are allowed to actively copy at once,
 /// mirroring OffShoot's Queuing modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum QueueMode {
     /// Every job starts immediately -- no admission control (the default,
     /// matching this app's behavior before Queuing existed).
+    #[default]
     Off,
     /// Only one source's jobs (its whole transfer group) run at a time;
     /// multiple destinations of that same source may still run together.
@@ -22,12 +23,6 @@ pub enum QueueMode {
     /// Only one job runs anywhere in the app at a time, even from the same
     /// source.
     SingleTransfer,
-}
-
-impl Default for QueueMode {
-    fn default() -> Self {
-        QueueMode::Off
-    }
 }
 
 struct ActiveJob {
@@ -131,8 +126,16 @@ mod tests {
     #[test]
     fn single_transfer_only_admits_when_nothing_is_active() {
         assert!(can_admit(QueueMode::SingleTransfer, &[], "g1"));
-        assert!(!can_admit(QueueMode::SingleTransfer, &[job("a", "g1")], "g1"));
-        assert!(!can_admit(QueueMode::SingleTransfer, &[job("a", "g1")], "g2"));
+        assert!(!can_admit(
+            QueueMode::SingleTransfer,
+            &[job("a", "g1")],
+            "g1"
+        ));
+        assert!(!can_admit(
+            QueueMode::SingleTransfer,
+            &[job("a", "g1")],
+            "g2"
+        ));
     }
 
     #[test]
@@ -179,7 +182,8 @@ mod tests {
         assert!(queue.wait_for_turn("a", "group-a", &cancel_a));
 
         let queue_thread = queue.clone();
-        let handle = std::thread::spawn(move || queue_thread.wait_for_turn("b", "group-b", &cancel_b));
+        let handle =
+            std::thread::spawn(move || queue_thread.wait_for_turn("b", "group-b", &cancel_b));
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         queue.job_finished("a");

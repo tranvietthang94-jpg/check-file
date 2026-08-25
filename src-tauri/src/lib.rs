@@ -31,11 +31,9 @@ pub fn run() {
 
     let copy_aggregation =
         explorer_integration::ExplorerCopyAggregationState::new(&startup_activation);
-    let builder = tauri::Builder::default()
-        .manage(copy_aggregation)
-        .manage(explorer_integration::ExplorerPendingState::new(
-            startup_activation,
-        ));
+    let builder = tauri::Builder::default().manage(copy_aggregation).manage(
+        explorer_integration::ExplorerPendingState::new(startup_activation),
+    );
 
     #[cfg(windows)]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {

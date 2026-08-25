@@ -140,23 +140,44 @@ mod tests {
     #[test]
     fn only_the_zero_to_one_transition_prevents_sleep() {
         assert!(should_prevent_on_start(0, true));
-        assert!(!should_prevent_on_start(1, true), "a second concurrent job must not re-trigger the OS call");
-        assert!(!should_prevent_on_start(0, false), "disabled means never prevent sleep");
+        assert!(
+            !should_prevent_on_start(1, true),
+            "a second concurrent job must not re-trigger the OS call"
+        );
+        assert!(
+            !should_prevent_on_start(0, false),
+            "disabled means never prevent sleep"
+        );
     }
 
     #[test]
     fn only_the_one_to_zero_transition_allows_sleep() {
         assert!(should_allow_on_finish(1));
-        assert!(!should_allow_on_finish(2), "other jobs are still active, sleep must stay prevented");
-        assert!(!should_allow_on_finish(0), "no job was active, nothing to release");
+        assert!(
+            !should_allow_on_finish(2),
+            "other jobs are still active, sleep must stay prevented"
+        );
+        assert!(
+            !should_allow_on_finish(0),
+            "no job was active, nothing to release"
+        );
     }
 
     #[test]
     fn toggling_enabled_mid_transfer_reacts_immediately() {
-        assert!(should_prevent_on_enable(3), "enabling while jobs are running must start preventing sleep right away");
+        assert!(
+            should_prevent_on_enable(3),
+            "enabling while jobs are running must start preventing sleep right away"
+        );
         assert!(!should_prevent_on_enable(0));
-        assert!(should_allow_on_disable(3), "disabling while jobs are running must release the OS call right away");
-        assert!(!should_allow_on_disable(0), "nothing was preventing sleep, nothing to release");
+        assert!(
+            should_allow_on_disable(3),
+            "disabling while jobs are running must release the OS call right away"
+        );
+        assert!(
+            !should_allow_on_disable(0),
+            "nothing was preventing sleep, nothing to release"
+        );
     }
 
     #[test]
