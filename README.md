@@ -8,9 +8,9 @@ OffloadKit helps copy camera media safely from a source drive to one or more bac
 
 ## Current release
 
-**v0.1.3 — Phase 12: Automatic Repair Planner**
+**v0.1.4 — Phase 13: Windows Explorer Workflows**
 
-This release includes the Phase 12 safety hardening and a real-file repair smoke test using Adobe Premiere Pro Auto-Save media.
+This release adds opt-in Windows Explorer actions for selecting endpoints and performing verified OffloadKit copies, plus fail-closed pathname revalidation immediately before sensitive copy mutations.
 
 Download installers from the [Releases](https://github.com/tranvietthang94-jpg/check-file/releases) page.
 
@@ -30,6 +30,11 @@ Download installers from the [Releases](https://github.com/tranvietthang94-jpg/c
 - Broken Media Detection for zero-byte source files.
 - Organize templates for folders, filenames, dates and counters.
 - Media Browser with metadata and thumbnails when bundled FFmpeg/FFprobe is available.
+- Windows Explorer integration (opt-in from Preferences):
+  - Set selected files or folders as Source, or a folder as Destination.
+  - Copy selections through the native Windows File Drop clipboard and Paste them into a selected folder with the current verification settings.
+  - Preserve selected-path layout, deduplicate repeated paths and prune nested selections.
+  - Reject filesystem links/reparse points, overlapping Source/Destination paths and destinations that fail a write probe.
 - Automatic Repair Planner:
   - Finds candidate copies from Source and sibling Destinations.
   - Accepts only a full checksum match against the MHL.
@@ -43,7 +48,7 @@ Download installers from the [Releases](https://github.com/tranvietthang94-jpg/c
 
 OffloadKit is designed to fail closed around destructive operations:
 
-1. Source and destination paths are validated before filesystem operations.
+1. Source and destination path components are revalidated immediately before selected-file opens, staging operations, final placement and verified source removal.
 2. Symlinks, junctions and Windows reparse points are rejected in protected paths.
 3. Copies are staged before being moved into the final destination name.
 4. Checksums are verified before a file is trusted or deleted from Source.
@@ -51,21 +56,24 @@ OffloadKit is designed to fail closed around destructive operations:
 6. Transfer logs and MHL files use atomic writes.
 7. Auto Eject is blocked by failed, missing, broken-media or move-delete-failed files.
 
-No software can remove every risk from failing hardware or an actively changing filesystem. Keep the original camera media until the verified backups have been reviewed.
+These pathname checks and filesystem mutations are separate operating-system operations, so a small pathname time-of-check/time-of-use (TOCTOU) window remains on an actively changing filesystem. Revalidation narrows that exposure; it does not eliminate it or make pathname access atomic. No software can remove every risk from failing hardware or a hostile filesystem. Keep the original camera media until the verified backups have been reviewed.
 
 ## Verification status
 
-Latest local verification for v0.1.3:
+Latest local verification for v0.1.4:
 
 ```text
-Frontend build:   PASS
-Playwright E2E:   25/25 PASS
-Rust tests:       176/176 PASS
-npm audit:        0 vulnerabilities
-Real-file repair smoke test: PASS
+Frontend build:                         PASS
+Playwright E2E:                         34/34 PASS
+Rust default suite:                     214 PASS, 1 ignored
+Real Windows clipboard/copy smoke:      1/1 PASS
+Clippy (all targets, warnings denied):  PASS
+Rust formatting check:                  PASS
+npm audit:                              0 vulnerabilities
+Real-file repair smoke test:            PASS
 ```
 
-The real-file smoke test used a copy of an Adobe Premiere Pro Auto-Save project, intentionally corrupted the copy, repaired it from the Auto-Save source, verified the repaired result, checked `.ofkit-corrupt` evidence, and removed only the temporary smoke-test folder.
+The real-file repair smoke test used a copy of an Adobe Premiere Pro Auto-Save project, intentionally corrupted the copy, repaired it from the Auto-Save source, verified the repaired result, checked `.ofkit-corrupt` evidence, and removed only the temporary repair folder. The separately invoked Phase 13 smoke exercised the native Windows File Drop clipboard and a real selected-path copy; it preserved both Source files, copied only the selected files, and left its printed temporary smoke tree available for inspection.
 
 ## Platforms and installers
 
@@ -104,6 +112,9 @@ npm run tauri dev
 npm run build
 npm run test:e2e
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo test phase13b_real_windows_file_drop_and_selected_copy_smoke --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 npm audit --audit-level=high
 ```
 

@@ -328,8 +328,8 @@ pub fn start_transfer_group<R: Runtime>(
 mod tests {
     use super::*;
     use crate::checksum::ChecksumAlgorithm;
-    use crate::copy_engine::{run_copy_core, FailedFile, ProgressPayload, ProgressSink};
     use crate::copy_engine::VerificationMode;
+    use crate::copy_engine::{run_copy_core, FailedFile, ProgressPayload, ProgressSink};
     use crate::organize::OrganizeSettings;
     use crate::source_selection::SourceSelection;
     use std::fs;
