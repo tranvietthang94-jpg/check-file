@@ -73,11 +73,11 @@ jobs:
           set -euo pipefail
           original_home="$HOME"
           smoke_home="$(mktemp -d "$RUNNER_TEMP/offloadkit-finder-home.XXXXXX")"
-          mkdir -p "$smoke_home/Library/Services"
-          HOME="$smoke_home" CARGO_HOME="${CARGO_HOME:-$original_home/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$original_home/.rustup}" \
+          mkdir -p "$smoke_home/Library/Services" "$smoke_home/tmp"
+          HOME="$smoke_home" TMPDIR="$smoke_home/tmp" CARGO_HOME="${CARGO_HOME:-$original_home/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$original_home/.rustup}" \
             cargo test --manifest-path src-tauri/Cargo.toml --lib \
             finder_integration::tests -- --test-threads=1
-          HOME="$smoke_home" CARGO_HOME="${CARGO_HOME:-$original_home/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$original_home/.rustup}" \
+          HOME="$smoke_home" TMPDIR="$smoke_home/tmp" CARGO_HOME="${CARGO_HOME:-$original_home/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$original_home/.rustup}" \
             cargo test --manifest-path src-tauri/Cargo.toml --lib \
             explorer_integration::tests::macos_file_url_pasteboard_round_trips_and_rejects_non_file_content \
             -- --exact --test-threads=1
