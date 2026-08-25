@@ -1830,12 +1830,15 @@ impl Drop for TestRegistryNamespace {
 mod tests {
     use super::{
         build_file_drop_payload, build_registry_command, explorer_action_requires_focus,
-        explorer_verbs, install_with_registry, integration_status_with_registry,
-        parse_explorer_activation, parse_explorer_request, prepare_request_with_clipboard,
-        uninstall_with_registry, validate_paste_destination_with_probe, ExplorerAction,
+        explorer_verbs, install_with_registry, parse_explorer_activation, parse_explorer_request,
+        prepare_request_with_clipboard, validate_paste_destination_with_probe, ExplorerAction,
         ExplorerActivation, ExplorerCopyAggregationState, ExplorerEvent, ExplorerPendingState,
-        MemoryFileDropClipboard, MemoryRegistry, NativeFileDropClipboard, RegistryAccess,
-        RegistryScope, TestRegistryNamespace,
+        MemoryFileDropClipboard, MemoryRegistry, RegistryAccess, RegistryScope,
+    };
+    #[cfg(windows)]
+    use super::{
+        integration_status_with_registry, uninstall_with_registry, NativeFileDropClipboard,
+        TestRegistryNamespace,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -2066,16 +2069,16 @@ mod tests {
         pasteboard.clearContents();
         assert!(pasteboard.setString_forType(
             &NSString::from_str("https://example.invalid/not-local"),
-            NSPasteboardTypeURL,
+            unsafe { NSPasteboardTypeURL },
         ));
         let remote = super::native_file_drop::read_paths_from(&pasteboard).unwrap_err();
         assert!(remote.to_string().contains("file URL"));
 
         pasteboard.clearContents();
-        assert!(pasteboard.setString_forType(
-            &NSString::from_str(":// malformed local URL"),
-            NSPasteboardTypeFileURL,
-        ));
+        assert!(pasteboard
+            .setString_forType(&NSString::from_str(":// malformed local URL"), unsafe {
+                NSPasteboardTypeFileURL
+            },));
         let malformed = super::native_file_drop::read_paths_from(&pasteboard).unwrap_err();
         assert!(malformed.to_string().contains("file URL"));
 
