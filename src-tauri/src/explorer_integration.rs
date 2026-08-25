@@ -930,13 +930,19 @@ struct NativeFileDropClipboard;
 impl FileDropClipboard for NativeFileDropClipboard {
     fn read_paths(&self) -> Result<Vec<PathBuf>, ExplorerRequestError> {
         native_file_drop::read_paths().map_err(|error| {
-            ExplorerRequestError::new(format!("Cannot read Windows File Drop clipboard: {error}"))
+            ExplorerRequestError::new(format!(
+                "Cannot read {}: {error}",
+                native_file_drop::DESCRIPTION
+            ))
         })
     }
 
     fn write_paths(&self, paths: &[PathBuf]) -> Result<(), ExplorerRequestError> {
         native_file_drop::write_paths(paths).map_err(|error| {
-            ExplorerRequestError::new(format!("Cannot write Windows File Drop clipboard: {error}"))
+            ExplorerRequestError::new(format!(
+                "Cannot write {}: {error}",
+                native_file_drop::DESCRIPTION
+            ))
         })
     }
 }
@@ -1156,11 +1162,21 @@ fn probe_destination_writable(destination: &Path) -> io::Result<()> {
 }
 
 fn paths_overlap(left: &Path, right: &Path) -> bool {
+    paths_overlap_platform(left, right)
+}
+
+#[cfg(windows)]
+fn paths_overlap_platform(left: &Path, right: &Path) -> bool {
     let left = path_key(left);
     let right = path_key(right);
     left == right
         || left.starts_with(&format!("{right}\\"))
         || right.starts_with(&format!("{left}\\"))
+}
+
+#[cfg(not(windows))]
+fn paths_overlap_platform(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
 }
 
 #[cfg(windows)]
@@ -1214,6 +1230,7 @@ mod native_file_drop {
     const GMEM_MOVEABLE: u32 = 0x0002;
     const GMEM_ZEROINIT: u32 = 0x0040;
     const DRAG_QUERY_FILE_COUNT: u32 = 0xFFFF_FFFF;
+    pub const DESCRIPTION: &str = "Windows File Drop clipboard";
 
     #[link(name = "user32")]
     unsafe extern "system" {
@@ -1335,10 +1352,121 @@ mod native_file_drop {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod native_file_drop {
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2::ClassType;
+    use objc2_app_kit::{NSPasteboard, NSPasteboardWriting};
+    use objc2_foundation::{NSArray, NSURL};
+    use std::io;
+    use std::path::PathBuf;
+
+    pub const DESCRIPTION: &str = "macOS file URL pasteboard";
+
+    pub fn write_paths(paths: &[PathBuf]) -> io::Result<()> {
+        write_paths_to(&NSPasteboard::generalPasteboard(), paths)
+    }
+
+    pub fn read_paths() -> io::Result<Vec<PathBuf>> {
+        read_paths_from(&NSPasteboard::generalPasteboard())
+    }
+
+    pub(super) fn write_paths_to(pasteboard: &NSPasteboard, paths: &[PathBuf]) -> io::Result<()> {
+        if paths.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "macOS file URL pasteboard requires at least one path",
+            ));
+        }
+
+        let urls = paths
+            .iter()
+            .map(|path| {
+                if !path.is_absolute() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("pasteboard path must be absolute: {}", path.display()),
+                    ));
+                }
+                let url = if path.is_dir() {
+                    NSURL::from_directory_path(path)
+                } else {
+                    NSURL::from_file_path(path)
+                };
+                url.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("cannot create a local file URL for {}", path.display()),
+                    )
+                })
+            })
+            .collect::<io::Result<Vec<_>>>()?;
+        let writers: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = urls
+            .into_iter()
+            .map(ProtocolObject::from_retained)
+            .collect();
+        let objects = NSArray::from_retained_slice(&writers);
+
+        pasteboard.clearContents();
+        if !pasteboard.writeObjects(&objects) {
+            return Err(io::Error::other(
+                "macOS refused the local file URL pasteboard write",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn read_paths_from(pasteboard: &NSPasteboard) -> io::Result<Vec<PathBuf>> {
+        let classes = NSArray::from_slice(&[NSURL::class()]);
+        let objects = unsafe { pasteboard.readObjectsForClasses_options(&classes, None) }
+            .ok_or_else(no_local_file_urls)?;
+        let urls = unsafe { objects.cast_unchecked::<NSURL>() };
+        if urls.count() == 0 {
+            return Err(no_local_file_urls());
+        }
+
+        let mut paths = Vec::with_capacity(urls.count());
+        for index in 0..urls.count() {
+            let url = urls.objectAtIndex(index);
+            if !url.isFileURL() || !has_local_file_host(&url) {
+                return Err(no_local_file_urls());
+            }
+            let path = url.to_file_path().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "macOS pasteboard contains a malformed file URL",
+                )
+            })?;
+            if !path.is_absolute() {
+                return Err(no_local_file_urls());
+            }
+            paths.push(path);
+        }
+        Ok(paths)
+    }
+
+    fn has_local_file_host(url: &NSURL) -> bool {
+        url.host().is_none_or(|host| {
+            let host = host.to_string();
+            host.is_empty() || host.eq_ignore_ascii_case("localhost")
+        })
+    }
+
+    fn no_local_file_urls() -> io::Error {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "macOS pasteboard does not contain local file URLs",
+        )
+    }
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 mod native_file_drop {
     use std::io;
     use std::path::PathBuf;
+
+    pub const DESCRIPTION: &str = "file-list clipboard";
 
     pub fn write_paths(_paths: &[PathBuf]) -> io::Result<()> {
         Err(io::Error::new(
@@ -1913,6 +2041,47 @@ mod tests {
         assert_eq!(u32::from_le_bytes(payload[0..4].try_into().unwrap()), 20);
         assert_eq!(i32::from_le_bytes(payload[16..20].try_into().unwrap()), 1);
         assert_eq!(&payload[payload.len() - 4..], &[0, 0, 0, 0]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_file_url_pasteboard_round_trips_and_rejects_non_file_content() {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL, NSPasteboardTypeURL};
+        use objc2_foundation::NSString;
+
+        let temp = tempdir().unwrap();
+        let first = temp.path().join("Thẻ nhớ A 001.mov");
+        let second = temp.path().join("Âm thanh.wav");
+        fs::write(&first, b"video").unwrap();
+        fs::write(&second, b"audio").unwrap();
+        let pasteboard = NSPasteboard::pasteboardWithUniqueName();
+
+        super::native_file_drop::write_paths_to(&pasteboard, &[first.clone(), second.clone()])
+            .unwrap();
+        assert_eq!(
+            super::native_file_drop::read_paths_from(&pasteboard).unwrap(),
+            vec![first, second]
+        );
+
+        pasteboard.clearContents();
+        assert!(pasteboard.setString_forType(
+            &NSString::from_str("https://example.invalid/not-local"),
+            NSPasteboardTypeURL,
+        ));
+        let remote = super::native_file_drop::read_paths_from(&pasteboard).unwrap_err();
+        assert!(remote.to_string().contains("file URL"));
+
+        pasteboard.clearContents();
+        assert!(pasteboard.setString_forType(
+            &NSString::from_str(":// malformed local URL"),
+            NSPasteboardTypeFileURL,
+        ));
+        let malformed = super::native_file_drop::read_paths_from(&pasteboard).unwrap_err();
+        assert!(malformed.to_string().contains("file URL"));
+
+        pasteboard.clearContents();
+        let empty = super::native_file_drop::read_paths_from(&pasteboard).unwrap_err();
+        assert!(empty.to_string().contains("file URL"));
     }
 
     #[test]
