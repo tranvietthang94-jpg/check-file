@@ -21,7 +21,23 @@ mod volume_rename;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[cfg(windows)]
+    let startup_activation =
+        explorer_integration::parse_explorer_activation(std::env::args_os());
+    #[cfg(not(windows))]
+    let startup_activation = explorer_integration::ExplorerActivation::None;
+
+    let builder = tauri::Builder::default()
+        .manage(explorer_integration::ExplorerPendingState::new(
+            startup_activation,
+        ));
+
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        explorer_integration::handle_secondary_instance(app, args);
+    }));
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -49,7 +65,9 @@ pub fn run() {
             commands::verify_mhl,
             commands::plan_mhl_repair,
             commands::repair_mhl_entry,
-            commands::verify_mhls_in_folder
+            commands::verify_mhls_in_folder,
+            explorer_integration::explorer_frontend_ready,
+            explorer_integration::acknowledge_explorer_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

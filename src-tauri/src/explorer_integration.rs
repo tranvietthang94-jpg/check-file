@@ -4,8 +4,13 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::{collections::HashSet, collections::VecDeque};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const MAX_EXPLORER_PATHS: usize = 100;
+pub const EXPLORER_REQUEST_EVENT: &str = "explorer://request";
+pub const EXPLORER_ERROR_EVENT: &str = "explorer://error";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +25,117 @@ pub struct ExplorerRequest {
     pub id: String,
     pub action: ExplorerAction,
     pub paths: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerErrorPayload {
+    pub id: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExplorerActivation {
+    None,
+    Request(ExplorerRequest),
+    Error(ExplorerErrorPayload),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExplorerEvent {
+    Request(ExplorerRequest),
+    Error(ExplorerErrorPayload),
+}
+
+#[derive(Default)]
+struct ExplorerPendingInner {
+    frontend_ready: bool,
+    pending: VecDeque<ExplorerEvent>,
+    seen_request_ids: HashSet<String>,
+    in_flight_request_ids: HashSet<String>,
+    consumed_request_ids: VecDeque<String>,
+}
+
+#[derive(Default)]
+pub struct ExplorerPendingState {
+    inner: Mutex<ExplorerPendingInner>,
+}
+
+impl ExplorerPendingState {
+    pub fn new(startup_activation: ExplorerActivation) -> Self {
+        let state = Self::default();
+        state.enqueue(startup_activation);
+        state
+    }
+
+    pub fn enqueue(&self, activation: ExplorerActivation) -> Vec<ExplorerEvent> {
+        let mut inner = self.inner.lock().unwrap();
+        let event = match activation {
+            ExplorerActivation::None => return Vec::new(),
+            ExplorerActivation::Request(request) => {
+                if !inner.seen_request_ids.insert(request.id.clone()) {
+                    return Vec::new();
+                }
+                ExplorerEvent::Request(request)
+            }
+            ExplorerActivation::Error(error) => ExplorerEvent::Error(error),
+        };
+
+        if inner.frontend_ready {
+            if let ExplorerEvent::Request(request) = &event {
+                inner.in_flight_request_ids.insert(request.id.clone());
+            }
+            vec![event]
+        } else {
+            inner.pending.push_back(event);
+            Vec::new()
+        }
+    }
+
+    pub fn mark_frontend_ready(&self) -> Vec<ExplorerEvent> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.frontend_ready = true;
+        let events: Vec<ExplorerEvent> = inner.pending.drain(..).collect();
+        for event in &events {
+            if let ExplorerEvent::Request(request) = event {
+                inner.in_flight_request_ids.insert(request.id.clone());
+            }
+        }
+        events
+    }
+
+    pub fn requeue_after_emit_failure(&self, event: ExplorerEvent) {
+        let mut inner = self.inner.lock().unwrap();
+        if let ExplorerEvent::Request(request) = &event {
+            inner.in_flight_request_ids.remove(&request.id);
+        }
+        inner.pending.push_front(event);
+    }
+
+    pub fn acknowledge(&self, request_id: &str) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.in_flight_request_ids.remove(request_id) {
+            return false;
+        }
+        inner.consumed_request_ids.push_back(request_id.to_owned());
+        true
+    }
+
+    #[cfg(test)]
+    fn pending_request_count(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap()
+            .pending
+            .iter()
+            .filter(|event| matches!(event, ExplorerEvent::Request(_)))
+            .count()
+    }
+
+    #[cfg(test)]
+    fn in_flight_request_count(&self) -> usize {
+        self.inner.lock().unwrap().in_flight_request_ids.len()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +218,95 @@ where
     })
 }
 
+pub fn parse_explorer_activation<I>(args: I) -> ExplorerActivation
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let args: Vec<OsString> = args.into_iter().collect();
+    let is_explorer_invocation = args
+        .iter()
+        .any(|arg| arg == OsStr::new("--explorer-action") || arg == OsStr::new("--path"));
+    if !is_explorer_invocation {
+        return ExplorerActivation::None;
+    }
+
+    match parse_explorer_request(args) {
+        Ok(request) => ExplorerActivation::Request(request),
+        Err(error) => ExplorerActivation::Error(ExplorerErrorPayload {
+            id: uuid::Uuid::new_v4().to_string(),
+            message: error.to_string(),
+        }),
+    }
+}
+
+#[cfg(windows)]
+pub fn handle_secondary_instance(app: &AppHandle, args: Vec<String>) {
+    let activation = parse_explorer_activation(args.into_iter().map(OsString::from));
+    if matches!(activation, ExplorerActivation::None) {
+        return;
+    }
+
+    focus_main_window(app);
+    let state = app.state::<ExplorerPendingState>();
+    let events = state.enqueue(activation);
+    if let Err(error) = emit_events(app, &state, events) {
+        eprintln!("Failed to forward Explorer activation: {error}");
+    }
+}
+
+#[tauri::command]
+pub fn explorer_frontend_ready(
+    app: AppHandle,
+    state: State<'_, ExplorerPendingState>,
+) -> Result<(), String> {
+    let events = state.mark_frontend_ready();
+    emit_events(&app, &state, events)
+}
+
+#[tauri::command]
+pub fn acknowledge_explorer_request(
+    request_id: String,
+    state: State<'_, ExplorerPendingState>,
+) -> Result<(), String> {
+    if state.acknowledge(&request_id) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Explorer request is not awaiting acknowledgement: {request_id}"
+        ))
+    }
+}
+
+fn emit_events(
+    app: &AppHandle,
+    state: &ExplorerPendingState,
+    events: Vec<ExplorerEvent>,
+) -> Result<(), String> {
+    for (index, event) in events.iter().enumerate() {
+        let result = match event {
+            ExplorerEvent::Request(request) => app.emit(EXPLORER_REQUEST_EVENT, request),
+            ExplorerEvent::Error(error) => app.emit(EXPLORER_ERROR_EVENT, error),
+        };
+        if let Err(error) = result {
+            for unreported in events[index..].iter().rev() {
+                state.requeue_after_emit_failure(unreported.clone());
+            }
+            return Err(error.to_string());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn focus_main_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
 fn parse_action(value: &OsStr) -> Result<ExplorerAction, ExplorerRequestError> {
     if value == OsStr::new("set-source") {
         Ok(ExplorerAction::SetSource)
@@ -180,7 +385,10 @@ fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_explorer_request, ExplorerAction};
+    use super::{
+        parse_explorer_activation, parse_explorer_request, ExplorerAction, ExplorerActivation,
+        ExplorerEvent, ExplorerPendingState,
+    };
     use std::ffi::OsString;
     use std::fs;
     use std::path::Path;
@@ -320,6 +528,83 @@ mod tests {
         let error = parse_explorer_request(explorer_args("set-source", &[&link])).unwrap_err();
 
         assert!(error.to_string().contains("link") || error.to_string().contains("reparse"));
+    }
+
+    #[test]
+    fn non_explorer_startup_args_produce_no_event() {
+        let activation = parse_explorer_activation([
+            OsString::from("OffloadKit.exe"),
+            OsString::from("--ordinary-flag"),
+        ]);
+
+        assert_eq!(activation, ExplorerActivation::None);
+    }
+
+    #[test]
+    fn valid_secondary_args_produce_one_request_event() {
+        let temp = tempdir().unwrap();
+
+        let activation = parse_explorer_activation(explorer_args("set-source", &[temp.path()]));
+        let state = ExplorerPendingState::default();
+        assert!(state.mark_frontend_ready().is_empty());
+        let events = state.enqueue(activation);
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ExplorerEvent::Request(_)));
+    }
+
+    #[test]
+    fn duplicate_request_id_is_never_dispatched_twice() {
+        let temp = tempdir().unwrap();
+        let request = parse_explorer_request(explorer_args("set-source", &[temp.path()])).unwrap();
+        let state = ExplorerPendingState::default();
+        state.mark_frontend_ready();
+
+        let first = state.enqueue(ExplorerActivation::Request(request.clone()));
+        let duplicate_while_in_flight = state.enqueue(ExplorerActivation::Request(request.clone()));
+        assert!(state.acknowledge(&request.id));
+        let duplicate_after_ack = state.enqueue(ExplorerActivation::Request(request));
+
+        assert_eq!(first.len(), 1);
+        assert!(duplicate_while_in_flight.is_empty());
+        assert!(duplicate_after_ack.is_empty());
+    }
+
+    #[test]
+    fn invalid_secondary_args_produce_error_without_pending_request() {
+        let activation = parse_explorer_activation([
+            OsString::from("OffloadKit.exe"),
+            OsString::from("--explorer-action"),
+            OsString::from("copy"),
+        ]);
+        let state = ExplorerPendingState::default();
+        state.mark_frontend_ready();
+
+        let events = state.enqueue(activation);
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ExplorerEvent::Error(_)));
+        assert_eq!(state.pending_request_count(), 0);
+        assert_eq!(state.in_flight_request_count(), 0);
+    }
+
+    #[test]
+    fn startup_request_waits_for_ready_and_acknowledgement() {
+        let temp = tempdir().unwrap();
+        let activation =
+            parse_explorer_activation(explorer_args("set-destination", &[temp.path()]));
+        let request_id = match &activation {
+            ExplorerActivation::Request(request) => request.id.clone(),
+            _ => panic!("expected request"),
+        };
+        let state = ExplorerPendingState::new(activation);
+
+        assert_eq!(state.pending_request_count(), 1);
+        let events = state.mark_frontend_ready();
+        assert_eq!(events.len(), 1);
+        assert_eq!(state.in_flight_request_count(), 1);
+        assert!(state.acknowledge(&request_id));
+        assert_eq!(state.in_flight_request_count(), 0);
     }
 
     #[cfg(windows)]

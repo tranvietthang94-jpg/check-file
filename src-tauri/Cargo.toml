@@ -37,6 +37,8 @@ base64 = "0.22.1"
 chrono = "0.4"
 quick-xml = "0.41"
 
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-single-instance = "2"
+
 [dev-dependencies]
 tempfile = "3.27.0"
-
