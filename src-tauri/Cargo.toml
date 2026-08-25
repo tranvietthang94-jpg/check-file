@@ -39,6 +39,7 @@ quick-xml = "0.41"
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
+winreg = "0.55"
 
 [dev-dependencies]
 tempfile = "3.27.0"
