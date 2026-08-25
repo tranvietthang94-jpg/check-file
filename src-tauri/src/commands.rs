@@ -13,6 +13,7 @@ use crate::organize::OrganizeSettings;
 use crate::presets::{self, Preset};
 use crate::queue::QueueMode;
 use crate::reports::{self, ReportRequest};
+use crate::source_selection::SourceSelection;
 use crate::transfer_log::{self, TransferLogEntry};
 
 #[tauri::command]
@@ -46,6 +47,7 @@ pub fn resolve_broken_media(registry: State<JobRegistry>, job_id: String, procee
 pub fn start_transfer_group(
     app_handle: AppHandle,
     source: String,
+    selected_paths: Option<Vec<String>>,
     destinations: Vec<String>,
     mode: TransferGroupMode,
     verification_mode: VerificationMode,
@@ -57,10 +59,21 @@ pub fn start_transfer_group(
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
     save_log_to_destination: bool,
     create_per_file_mhl: bool,
-) -> String {
-    cascade::start_transfer_group(
+) -> Result<String, String> {
+    let source = PathBuf::from(source);
+    let source_selection = selected_paths
+        .map(|paths| {
+            SourceSelection::new(
+                source.clone(),
+                paths.into_iter().map(PathBuf::from).collect(),
+            )
+        })
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    Ok(cascade::start_transfer_group(
         app_handle,
-        PathBuf::from(source),
+        source,
+        source_selection,
         destinations.into_iter().map(PathBuf::from).collect(),
         mode,
         verification_mode,
@@ -72,7 +85,7 @@ pub fn start_transfer_group(
         legacy_checksum_algorithm,
         save_log_to_destination,
         create_per_file_mhl,
-    )
+    ))
 }
 
 #[tauri::command]

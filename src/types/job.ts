@@ -36,6 +36,7 @@ export interface TransferJob {
   sourceLabel: string;
   destinationLabel: string;
   sourcePath: string;
+  selectedPaths?: string[];
   destinationPath: string;
   verificationMode: VerificationMode;
   checksumAlgorithm: ChecksumAlgorithm;

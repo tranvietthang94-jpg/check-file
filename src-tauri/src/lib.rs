@@ -16,6 +16,7 @@ mod power;
 mod presets;
 mod queue;
 mod reports;
+mod source_selection;
 mod transfer_log;
 mod volume_rename;
 

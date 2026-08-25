@@ -13,6 +13,7 @@ export interface GroupJobAddedEventPayload {
   groupId: string;
   jobId: string;
   source: string;
+  selectedPaths?: string[];
   destination: string;
   hop: 1 | 2;
   sourceVolumeSignature: string | null;

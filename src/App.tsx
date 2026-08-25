@@ -302,6 +302,7 @@ function App() {
         sourceLabel: pathLabel(payload.source),
         destinationLabel: pathLabel(payload.destination),
         sourcePath: payload.source,
+        selectedPaths: payload.selectedPaths,
         destinationPath: payload.destination,
         verificationMode,
         checksumAlgorithm,
@@ -465,6 +466,7 @@ function App() {
     }
     const groupId = await startTransferGroup(
       source.path,
+      source.selectedPaths ?? null,
       destinationEndpoints.map((d) => d.path),
       mode,
       verificationMode,
@@ -551,6 +553,7 @@ function App() {
 
     const groupId = await startTransferGroup(
       job.sourcePath,
+      job.selectedPaths ?? null,
       [job.destinationPath],
       "parallel",
       job.verificationMode,

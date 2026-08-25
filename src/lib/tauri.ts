@@ -112,6 +112,7 @@ export function onDisksChanged(
 
 export function startTransferGroup(
   source: string,
+  selectedPaths: string[] | null,
   destinations: string[],
   mode: TransferGroupMode,
   verificationMode: VerificationMode,
@@ -126,6 +127,7 @@ export function startTransferGroup(
 ): Promise<string> {
   return invoke<string>("start_transfer_group", {
     source,
+    selectedPaths,
     destinations,
     mode,
     verificationMode,

@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::checksum::ChecksumAlgorithm;
 use crate::copy_engine::{self, CopyOutcome, JobRegistry, VerificationMode};
 use crate::organize::OrganizeSettings;
+use crate::source_selection::SourceSelection;
 
 pub const GROUP_JOB_ADDED_EVENT: &str = "transfer-group-job-added";
 
@@ -39,6 +40,7 @@ pub struct GroupJobAddedPayload {
     /// re-reads from `source`. `None` when it can't be determined -- the
     /// frontend treats that as "can't verify" rather than blocking Resume.
     pub source_volume_signature: Option<String>,
+    pub selected_paths: Option<Vec<String>>,
 }
 
 /// A relay hop should only run if the file(s) it depends on are actually
@@ -48,10 +50,20 @@ fn should_cascade_continue(hop1_outcome: &CopyOutcome) -> bool {
     !hop1_outcome.cancelled && hop1_outcome.failed_files.is_empty()
 }
 
+fn selection_for_relay(
+    selection: Option<&SourceSelection>,
+    primary: &std::path::Path,
+) -> std::io::Result<Option<SourceSelection>> {
+    selection
+        .map(|selection| selection.rebase(primary.to_path_buf()))
+        .transpose()
+}
+
 fn spawn_job<R: Runtime>(
     app_handle: &AppHandle<R>,
     group_id: &str,
     source: PathBuf,
+    source_selection: Option<SourceSelection>,
     destination: PathBuf,
     hop: u8,
     verification_mode: VerificationMode,
@@ -76,6 +88,13 @@ fn spawn_job<R: Runtime>(
             destination: destination.display().to_string(),
             hop,
             source_volume_signature: crate::disks::volume_signature(&source.display().to_string()),
+            selected_paths: source_selection.as_ref().map(|selection| {
+                selection
+                    .selected_paths()
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect()
+            }),
         },
     );
 
@@ -101,6 +120,7 @@ fn spawn_job<R: Runtime>(
             app_handle_thread,
             job_id_thread,
             source,
+            source_selection,
             destination,
             cancel_flag,
             verification_mode,
@@ -125,6 +145,7 @@ fn spawn_job<R: Runtime>(
 pub fn start_transfer_group<R: Runtime>(
     app_handle: AppHandle<R>,
     source: PathBuf,
+    source_selection: Option<SourceSelection>,
     destinations: Vec<PathBuf>,
     mode: TransferGroupMode,
     verification_mode: VerificationMode,
@@ -155,6 +176,7 @@ pub fn start_transfer_group<R: Runtime>(
                     &app_handle,
                     &group_id,
                     source.clone(),
+                    source_selection.clone(),
                     destination,
                     1,
                     verification_mode,
@@ -189,6 +211,13 @@ pub fn start_transfer_group<R: Runtime>(
                     source_volume_signature: crate::disks::volume_signature(
                         &source.display().to_string(),
                     ),
+                    selected_paths: source_selection.as_ref().map(|selection| {
+                        selection
+                            .selected_paths()
+                            .iter()
+                            .map(|path| path.display().to_string())
+                            .collect()
+                    }),
                 },
             );
 
@@ -198,6 +227,7 @@ pub fn start_transfer_group<R: Runtime>(
             let source_name_thread = source_name.clone();
             let organize_thread = organize.clone();
             let hop1_job_id_thread = hop1_job_id.clone();
+            let source_selection_thread = source_selection.clone();
 
             std::thread::spawn(move || {
                 let admitted = app_handle_thread.state::<JobRegistry>().wait_for_turn(
@@ -224,6 +254,7 @@ pub fn start_transfer_group<R: Runtime>(
                     app_handle_thread.clone(),
                     hop1_job_id,
                     source,
+                    source_selection_thread.clone(),
                     primary_thread.clone(),
                     cancel_flag,
                     verification_mode,
@@ -241,6 +272,17 @@ pub fn start_transfer_group<R: Runtime>(
                     return;
                 }
 
+                let relay_selection = match selection_for_relay(
+                    source_selection_thread.as_ref(),
+                    &primary_thread,
+                ) {
+                    Ok(selection) => selection,
+                    Err(error) => {
+                        eprintln!("Cannot preserve selected paths for cascade relay: {error}");
+                        return;
+                    }
+                };
+
                 for destination in rest {
                     // Hop 2's "source" is the primary destination we just
                     // wrote and verified -- it must never be deleted, so this
@@ -251,6 +293,7 @@ pub fn start_transfer_group<R: Runtime>(
                         &app_handle_thread,
                         &group_id_thread,
                         primary_thread.clone(),
+                        relay_selection.clone(),
                         destination,
                         2,
                         verification_mode,
@@ -275,6 +318,7 @@ pub fn start_transfer_group<R: Runtime>(
 mod tests {
     use super::*;
     use crate::copy_engine::{run_copy_core, FailedFile, ProgressPayload, ProgressSink};
+    use crate::source_selection::SourceSelection;
     use std::fs;
     use std::sync::atomic::AtomicBool;
 
@@ -331,6 +375,31 @@ mod tests {
         assert_eq!(
             fs::read(secondary_dir.path().join("clip.mov")).unwrap(),
             b"camera card footage"
+        );
+    }
+
+    #[test]
+    fn selected_cascade_rebases_the_same_layout_onto_the_primary() {
+        let source = tempfile::tempdir().unwrap();
+        let primary = tempfile::tempdir().unwrap();
+        let selected_folder = source.path().join("CARD_A");
+        fs::create_dir_all(&selected_folder).unwrap();
+        fs::write(selected_folder.join("clip.mov"), b"footage").unwrap();
+        fs::create_dir_all(primary.path().join("CARD_A")).unwrap();
+        fs::write(primary.path().join("CARD_A").join("clip.mov"), b"footage").unwrap();
+        let selection = SourceSelection::new(
+            source.path().to_path_buf(),
+            vec![selected_folder],
+        )
+        .unwrap();
+
+        let relay = selection_for_relay(Some(&selection), primary.path()).unwrap();
+
+        let relay = relay.expect("selected cascades must stay selected on hop 2");
+        assert_eq!(relay.common_root(), primary.path());
+        assert_eq!(
+            relay.selected_paths(),
+            &[primary.path().join("CARD_A")]
         );
     }
 

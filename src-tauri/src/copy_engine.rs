@@ -14,6 +14,7 @@ use crate::checksum::{self, ChecksumAlgorithm, StreamingHasher};
 use crate::dedup::{self, DuplicateAction};
 use crate::mhl::{self, MhlFileEntry};
 use crate::organize::{self, OrganizeSettings, TokenContext};
+use crate::source_selection::SourceSelection;
 use crate::transfer_log::{self, TransferLogEntry};
 
 /// How thoroughly a transfer is checked for integrity.
@@ -470,6 +471,116 @@ fn scan_source(source: &Path) -> std::io::Result<Vec<FileEntry>> {
     Ok(entries)
 }
 
+fn scan_source_selection(selection: &SourceSelection) -> std::io::Result<Vec<FileEntry>> {
+    let mut entries = Vec::new();
+    for selected in selection.selected_paths() {
+        let metadata = fs::metadata(selected)?;
+        if metadata.is_file() {
+            entries.push(FileEntry {
+                absolute: selected.clone(),
+                relative: selected
+                    .strip_prefix(selection.common_root())
+                    .map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "selected file escaped its common root",
+                        )
+                    })?
+                    .to_path_buf(),
+                size: metadata.len(),
+                modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+            });
+            continue;
+        }
+
+        for entry in WalkDir::new(selected).follow_links(false) {
+            let entry = entry.map_err(|error| std::io::Error::other(error.to_string()))?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "filesystem link or reparse point is not allowed in source selection: {}",
+                        entry.path().display()
+                    ),
+                ));
+            }
+            if metadata.is_file() {
+                entries.push(FileEntry {
+                    absolute: entry.path().to_path_buf(),
+                    relative: entry
+                        .path()
+                        .strip_prefix(selection.common_root())
+                        .map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "selected file escaped its common root",
+                            )
+                        })?
+                        .to_path_buf(),
+                    size: metadata.len(),
+                    modified: metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                });
+            }
+        }
+    }
+    Ok(entries)
+}
+
+fn mirror_selected_directories(
+    selection: &SourceSelection,
+    destination: &Path,
+) -> std::io::Result<()> {
+    for selected in selection.selected_paths() {
+        if !fs::metadata(selected)?.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(selected).follow_links(false) {
+            let entry = entry.map_err(|error| std::io::Error::other(error.to_string()))?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            if metadata.file_type().is_symlink() || is_windows_reparse_point(&metadata) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "filesystem link or reparse point is not allowed in source selection: {}",
+                        entry.path().display()
+                    ),
+                ));
+            }
+            if !metadata.is_dir() {
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(selection.common_root())
+                .map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "selected directory escaped its common root",
+                    )
+                })?;
+            if relative.as_os_str().is_empty() {
+                continue;
+            }
+            let target = crate::path_safety::safe_destination(destination, relative)?;
+            fs::create_dir_all(&target)?;
+            crate::path_safety::revalidate_destination(destination, &target)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x400 != 0
+}
+
+#[cfg(not(windows))]
+fn is_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
+}
+
 /// Outcome of copying a single file.
 enum CopyFileOutcome {
     Cancelled,
@@ -575,6 +686,70 @@ pub fn run_copy_core(
     move_same_volume: bool,
     legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
 ) -> CopyOutcome {
+    run_copy_core_inner(
+        sink,
+        job_id,
+        source,
+        None,
+        destination,
+        cancel_flag,
+        verification_mode,
+        checksum_algorithm,
+        source_name,
+        organize,
+        move_after_transfer,
+        move_same_volume,
+        legacy_checksum_algorithm,
+    )
+}
+
+pub fn run_copy_core_with_selection(
+    sink: &dyn ProgressSink,
+    job_id: String,
+    selection: &SourceSelection,
+    destination: &Path,
+    cancel_flag: &AtomicBool,
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
+    source_name: &str,
+    organize: &OrganizeSettings,
+    move_after_transfer: bool,
+    move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+) -> CopyOutcome {
+    run_copy_core_inner(
+        sink,
+        job_id,
+        selection.common_root(),
+        Some(selection),
+        destination,
+        cancel_flag,
+        verification_mode,
+        checksum_algorithm,
+        source_name,
+        organize,
+        move_after_transfer,
+        move_same_volume,
+        legacy_checksum_algorithm,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_copy_core_inner(
+    sink: &dyn ProgressSink,
+    job_id: String,
+    source: &Path,
+    selection: Option<&SourceSelection>,
+    destination: &Path,
+    cancel_flag: &AtomicBool,
+    verification_mode: VerificationMode,
+    checksum_algorithm: ChecksumAlgorithm,
+    source_name: &str,
+    organize: &OrganizeSettings,
+    move_after_transfer: bool,
+    move_same_volume: bool,
+    legacy_checksum_algorithm: Option<ChecksumAlgorithm>,
+) -> CopyOutcome {
     let source_root = fs::canonicalize(source);
     let destination_root = fs::canonicalize(destination);
     if let (Ok(source_root), Ok(destination_root)) = (&source_root, &destination_root) {
@@ -612,7 +787,7 @@ pub fn run_copy_core(
         && crate::disks::volume_signature(&source.display().to_string())
             .zip(crate::disks::volume_signature(&destination.display().to_string()))
             .is_some_and(|(a, b)| a == b);
-    let mut entries = match scan_source(source) {
+    let mut entries = match selection.map_or_else(|| scan_source(source), scan_source_selection) {
         Ok(e) => e,
         Err(err) => {
             return CopyOutcome {
@@ -1133,11 +1308,13 @@ pub fn run_copy_core(
     if !cancelled {
         tracker.emit(""); // final flush so the UI can reach 100%
 
-        if !organize.ignore_empty_folders
-            && !organize.flatten
-            && organize.folder_template.is_none()
+        if !organize.ignore_empty_folders && !organize.flatten && organize.folder_template.is_none()
         {
-            let _ = organize::mirror_empty_source_dirs(source, destination, &dirs_with_files);
+            if let Some(selection) = selection {
+                let _ = mirror_selected_directories(selection, destination);
+            } else {
+                let _ = organize::mirror_empty_source_dirs(source, destination, &dirs_with_files);
+            }
         }
     }
 
@@ -1232,6 +1409,7 @@ pub fn run_copy_job<R: Runtime>(
     app_handle: AppHandle<R>,
     job_id: String,
     source: PathBuf,
+    source_selection: Option<SourceSelection>,
     destination: PathBuf,
     cancel_flag: Arc<AtomicBool>,
     verification_mode: VerificationMode,
@@ -1250,20 +1428,36 @@ pub fn run_copy_job<R: Runtime>(
         cancel_flag: cancel_flag.clone(),
     };
     let started_at = SystemTime::now();
-    let outcome = run_copy_core(
-        &sink,
-        job_id.clone(),
-        &source,
-        &destination,
-        &cancel_flag,
-        verification_mode,
-        checksum_algorithm,
-        &source_name,
-        &organize,
-        move_after_transfer,
-        move_same_volume,
-        legacy_checksum_algorithm,
-    );
+    let outcome = match source_selection.as_ref() {
+        Some(selection) => run_copy_core_with_selection(
+            &sink,
+            job_id.clone(),
+            selection,
+            &destination,
+            &cancel_flag,
+            verification_mode,
+            checksum_algorithm,
+            &source_name,
+            &organize,
+            move_after_transfer,
+            move_same_volume,
+            legacy_checksum_algorithm,
+        ),
+        None => run_copy_core(
+            &sink,
+            job_id.clone(),
+            &source,
+            &destination,
+            &cancel_flag,
+            verification_mode,
+            checksum_algorithm,
+            &source_name,
+            &organize,
+            move_after_transfer,
+            move_same_volume,
+            legacy_checksum_algorithm,
+        ),
+    };
     let finished_at = SystemTime::now();
 
     // Persist the MHL and transfer log before announcing completion. Consumers
@@ -1396,6 +1590,151 @@ mod tests {
         let entries = scan_source(dir.path()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].relative, Path::new("inside.mov"));
+    }
+
+    #[test]
+    fn selected_copy_preserves_common_root_layout_and_excludes_unselected_files() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(src_dir.path().join("CARD_A").join("DCIM")).unwrap();
+        fs::create_dir_all(src_dir.path().join("CARD_B")).unwrap();
+        let selected_file = src_dir.path().join("CARD_A").join("DCIM").join("A001.mov");
+        let selected_folder = src_dir.path().join("CARD_B");
+        fs::write(&selected_file, b"selected file").unwrap();
+        fs::write(selected_folder.join("B001.wav"), b"selected folder file").unwrap();
+        fs::write(src_dir.path().join("not-selected.mov"), b"leave behind").unwrap();
+
+        let selection = SourceSelection::new(
+            src_dir.path().to_path_buf(),
+            vec![selected_file, selected_folder],
+        )
+        .unwrap();
+        let outcome = run_copy_core_with_selection(
+            &NoopSink,
+            "selected-copy".to_string(),
+            &selection,
+            dst_dir.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Selection",
+            &OrganizeSettings::default(),
+            false,
+            false,
+            None,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert_eq!(outcome.files_copied, 2);
+        assert_eq!(
+            fs::read(dst_dir.path().join("CARD_A").join("DCIM").join("A001.mov")).unwrap(),
+            b"selected file"
+        );
+        assert_eq!(
+            fs::read(dst_dir.path().join("CARD_B").join("B001.wav")).unwrap(),
+            b"selected folder file"
+        );
+        assert!(!dst_dir.path().join("not-selected.mov").exists());
+        assert_eq!(outcome.verified_files.len(), 2);
+        assert_eq!(outcome.mhl_entries.len(), 2);
+        assert!(outcome.missing_files.is_empty());
+    }
+
+    #[test]
+    fn selected_copy_mirrors_only_selected_empty_directories_when_enabled() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let dst_dir = tempfile::tempdir().unwrap();
+        let selected = src_dir.path().join("selected");
+        fs::create_dir_all(selected.join("empty").join("nested")).unwrap();
+        fs::create_dir_all(src_dir.path().join("unselected").join("empty")).unwrap();
+        let selection =
+            SourceSelection::new(src_dir.path().to_path_buf(), vec![selected]).unwrap();
+        let mut organize = OrganizeSettings::default();
+        organize.ignore_empty_folders = false;
+
+        let outcome = run_copy_core_with_selection(
+            &NoopSink,
+            "selected-empty-folders".to_string(),
+            &selection,
+            dst_dir.path(),
+            &AtomicBool::new(false),
+            VerificationMode::SourceAndDestination,
+            ChecksumAlgorithm::Xxh64,
+            "Selection",
+            &organize,
+            false,
+            false,
+            None,
+        );
+
+        assert!(outcome.failed_files.is_empty());
+        assert!(dst_dir
+            .path()
+            .join("selected")
+            .join("empty")
+            .join("nested")
+            .is_dir());
+        assert!(!dst_dir.path().join("unselected").exists());
+    }
+
+    #[test]
+    fn source_selection_deduplicates_and_prunes_children_of_selected_folders() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let folder = src_dir.path().join("CARD");
+        let nested = folder.join("DCIM").join("clip.mov");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, b"clip").unwrap();
+
+        let selection = SourceSelection::from_paths(vec![
+            folder.clone(),
+            nested,
+            folder.clone(),
+        ])
+        .unwrap();
+
+        assert_eq!(selection.common_root(), src_dir.path());
+        assert_eq!(selection.selected_paths(), &[folder]);
+    }
+
+    #[test]
+    fn source_selection_rejects_parent_traversal_and_paths_outside_common_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let inside = root.path().join("inside.mov");
+        let outside_file = outside.path().join("outside.mov");
+        fs::write(&inside, b"inside").unwrap();
+        fs::write(&outside_file, b"outside").unwrap();
+
+        let outside_error = SourceSelection::new(
+            root.path().to_path_buf(),
+            vec![outside_file],
+        )
+        .unwrap_err();
+        let traversal = root.path().join("folder").join("..").join("inside.mov");
+        let traversal_error = SourceSelection::new(root.path().to_path_buf(), vec![traversal])
+            .unwrap_err();
+
+        assert!(outside_error.to_string().contains("common root"));
+        assert!(traversal_error.to_string().contains("parent"));
+    }
+
+    #[test]
+    fn source_selection_rejects_links_inside_a_selected_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let selected = root.path().join("selected");
+        fs::create_dir(&selected).unwrap();
+        let outside_file = outside.path().join("outside.mov");
+        fs::write(&outside_file, b"outside").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside_file, selected.join("link.mov")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&outside_file, selected.join("link.mov")).unwrap();
+
+        let error = SourceSelection::from_paths(vec![selected]).unwrap_err();
+
+        assert!(error.to_string().contains("link") || error.to_string().contains("reparse"));
     }
 
     #[test]
