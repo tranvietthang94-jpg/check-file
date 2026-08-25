@@ -2061,9 +2061,15 @@ mod tests {
 
         super::native_file_drop::write_paths_to(&pasteboard, &[first.clone(), second.clone()])
             .unwrap();
+        let read_back = super::native_file_drop::read_paths_from(&pasteboard).unwrap();
+        assert_eq!(read_back.len(), 2);
         assert_eq!(
-            super::native_file_drop::read_paths_from(&pasteboard).unwrap(),
-            vec![first, second]
+            fs::canonicalize(&read_back[0]).unwrap(),
+            fs::canonicalize(&first).unwrap()
+        );
+        assert_eq!(
+            fs::canonicalize(&read_back[1]).unwrap(),
+            fs::canonicalize(&second).unwrap()
         );
 
         pasteboard.clearContents();
