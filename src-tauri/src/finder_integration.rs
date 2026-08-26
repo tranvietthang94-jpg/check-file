@@ -749,6 +749,14 @@ fn render_document_wflow(definition: &WorkflowDefinition, executable: &str) -> S
         <key>AMProvides</key><dict><key>Container</key><string>List</string><key>Types</key><array><string>com.apple.cocoa.path</string></array></dict>
         <key>ActionBundlePath</key><string>/System/Library/Automator/Run Shell Script.action</string>
         <key>ActionName</key><string>Run Shell Script</string>
+        <key>ActionParameters</key>
+        <dict>
+          <key>COMMAND_STRING</key><string>{script}</string>
+          <key>CheckedForUserDefaultShell</key><true/>
+          <key>inputMethod</key><integer>1</integer>
+          <key>shell</key><string>/bin/bash</string>
+          <key>source</key><string></string>
+        </dict>
         <key>BundleIdentifier</key><string>com.apple.RunShellScript</string>
         <key>Class Name</key><string>RunShellScriptAction</string>
         <key>InputUUID</key><string>{input_uuid}</string>
@@ -756,14 +764,6 @@ fn render_document_wflow(definition: &WorkflowDefinition, executable: &str) -> S
         <key>UUID</key><string>{action_uuid}</string>
       </dict>
       <key>isViewVisible</key><false/>
-      <key>ActionParameters</key>
-      <dict>
-        <key>COMMAND_STRING</key><string>{script}</string>
-        <key>CheckedForUserDefaultShell</key><true/>
-        <key>inputMethod</key><integer>1</integer>
-        <key>shell</key><string>/bin/bash</string>
-        <key>source</key><string></string>
-      </dict>
     </dict>
   </array>
   <key>connectors</key><dict/>
@@ -852,6 +852,15 @@ mod tests {
             assert!(workflow
                 .document_wflow
                 .contains("<key>ActionParameters</key>"));
+            let action_parameters = workflow
+                .document_wflow
+                .find("<key>ActionParameters</key>")
+                .unwrap();
+            let action_dict_close = workflow
+                .document_wflow
+                .find("      </dict>\n      <key>isViewVisible</key>")
+                .unwrap();
+            assert!(action_parameters < action_dict_close);
             assert!(!workflow.document_wflow.contains("<key>parameters</key>"));
         }
     }
@@ -883,6 +892,52 @@ mod tests {
             assert!(!workflow.document_wflow.contains("eval "));
             assert!(!workflow.document_wflow.contains("$*"));
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn installed_workflow_runs_action_with_selected_folder_as_an_argument() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::Command;
+
+        let temp = tempdir().unwrap();
+        let services = temp.path().join("Library/Services");
+        let recorder = temp.path().join("OffloadKit Recorder");
+        let recorded = temp.path().join("recorded-args");
+        std::fs::write(
+            &recorder,
+            format!(
+                "#!/bin/bash\nprintf '%s\\0' \"$@\" > {}\n",
+                super::shell_single_quote(recorded.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&recorder).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&recorder, permissions).unwrap();
+        install_at(&services, &recorder, false).unwrap();
+
+        let selected = temp.path().join("Destination Folder");
+        std::fs::create_dir(&selected).unwrap();
+        let workflow = services.join("OffloadKit Set Destination.workflow");
+        let output = Command::new("/usr/bin/automator")
+            .arg("-i")
+            .arg(&selected)
+            .arg(&workflow)
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "automator failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let args = std::fs::read(recorded).unwrap();
+        let expected = format!(
+            "--finder-action\0set-destination\0--path\0{}\0",
+            selected.display()
+        );
+        assert_eq!(args, expected.as_bytes());
     }
 
     #[test]
