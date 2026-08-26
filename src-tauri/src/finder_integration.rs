@@ -961,11 +961,28 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             let args = std::fs::read(&recorded).unwrap();
-            let expected = format!(
-                "--finder-action\0{action}\0--path\0{}\0",
-                selected.display()
+            let fields: Vec<&[u8]> = args
+                .split(|byte| *byte == 0)
+                .filter(|field| !field.is_empty())
+                .collect();
+            assert_eq!(
+                fields[..3],
+                [
+                    b"--finder-action".as_slice(),
+                    action.as_bytes(),
+                    b"--path".as_slice(),
+                ],
+                "wrong action arguments for {bundle}"
             );
-            assert_eq!(args, expected.as_bytes(), "wrong arguments for {bundle}");
+            assert_eq!(fields.len(), 4, "wrong argument count for {bundle}");
+            let recorded_path = std::path::PathBuf::from(
+                std::str::from_utf8(fields[3]).expect("Automator path must be UTF-8"),
+            );
+            assert_eq!(
+                std::fs::canonicalize(recorded_path).unwrap(),
+                std::fs::canonicalize(selected).unwrap(),
+                "wrong selected path for {bundle}"
+            );
         }
     }
 

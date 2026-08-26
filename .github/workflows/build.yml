@@ -46,6 +46,7 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-msvc'
         run: |
           npm run build
+          npx playwright install chromium
           npm run test:e2e
 
       # Bundles ffmpeg/ffprobe into the installer as Tauri sidecars so Media
