@@ -727,7 +727,7 @@ fn render_document_wflow(definition: &WorkflowDefinition, executable: &str) -> S
     };
     let executable = shell_single_quote(executable);
     let script = format!(
-        "executable={executable}\nargs=(--finder-action {action})\nfor path in \"$@\"; do\n  args+=(--path \"$path\")\ndone\nexec \"$executable\" \"${{args[@]}}\"",
+        "executable={executable}\nargs=(--finder-action {action})\nfor path in \"$@\"; do\n  args+=(--path \"$path\")\ndone\n/usr/bin/nohup \"$executable\" \"${{args[@]}}\" >/dev/null 2>&1 &",
         action = definition.action_argument,
     );
     format!(
@@ -849,6 +849,10 @@ mod tests {
                 .document_wflow
                 .contains("args+=(--path &quot;$path&quot;)"));
             assert!(workflow.document_wflow.contains("&quot;${args[@]}&quot;"));
+            assert!(workflow.document_wflow.contains("/usr/bin/nohup"));
+            assert!(workflow
+                .document_wflow
+                .contains("&quot;${args[@]}&quot; &gt;/dev/null 2&gt;&amp;1 &amp;"));
             assert!(workflow
                 .document_wflow
                 .contains("<key>ActionParameters</key>"));
@@ -937,6 +941,7 @@ mod tests {
         ];
 
         for (bundle, action, selected) in cases {
+            let _ = std::fs::remove_file(&recorded);
             let output = Command::new("/usr/bin/automator")
                 .arg("-i")
                 .arg(selected)
@@ -949,6 +954,12 @@ mod tests {
                 "automator failed for {bundle}: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            for _ in 0..100 {
+                if recorded.is_file() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
             let args = std::fs::read(&recorded).unwrap();
             let expected = format!(
                 "--finder-action\0{action}\0--path\0{}\0",
