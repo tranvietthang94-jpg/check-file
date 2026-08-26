@@ -917,27 +917,45 @@ mod tests {
         std::fs::set_permissions(&recorder, permissions).unwrap();
         install_at(&services, &recorder, false).unwrap();
 
-        let selected = temp.path().join("Destination Folder");
-        std::fs::create_dir(&selected).unwrap();
-        let workflow = services.join("OffloadKit Set Destination.workflow");
-        let output = Command::new("/usr/bin/automator")
-            .arg("-i")
-            .arg(&selected)
-            .arg(&workflow)
-            .output()
-            .unwrap();
+        let selected_file = temp.path().join("Thẻ nhớ A 001.mov");
+        let selected_folder = temp.path().join("Destination Folder");
+        std::fs::write(&selected_file, b"video").unwrap();
+        std::fs::create_dir(&selected_folder).unwrap();
+        let cases = [
+            (
+                "OffloadKit Set Source.workflow",
+                "set-source",
+                &selected_file,
+            ),
+            (
+                "OffloadKit Set Destination.workflow",
+                "set-destination",
+                &selected_folder,
+            ),
+            ("OffloadKit Copy.workflow", "copy", &selected_file),
+            ("OffloadKit Paste.workflow", "paste", &selected_folder),
+        ];
 
-        assert!(
-            output.status.success(),
-            "automator failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let args = std::fs::read(recorded).unwrap();
-        let expected = format!(
-            "--finder-action\0set-destination\0--path\0{}\0",
-            selected.display()
-        );
-        assert_eq!(args, expected.as_bytes());
+        for (bundle, action, selected) in cases {
+            let output = Command::new("/usr/bin/automator")
+                .arg("-i")
+                .arg(selected)
+                .arg(services.join(bundle))
+                .output()
+                .unwrap();
+
+            assert!(
+                output.status.success(),
+                "automator failed for {bundle}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let args = std::fs::read(&recorded).unwrap();
+            let expected = format!(
+                "--finder-action\0{action}\0--path\0{}\0",
+                selected.display()
+            );
+            assert_eq!(args, expected.as_bytes(), "wrong arguments for {bundle}");
+        }
     }
 
     #[test]
