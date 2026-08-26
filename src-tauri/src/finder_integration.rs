@@ -756,7 +756,7 @@ fn render_document_wflow(definition: &WorkflowDefinition, executable: &str) -> S
         <key>UUID</key><string>{action_uuid}</string>
       </dict>
       <key>isViewVisible</key><false/>
-      <key>parameters</key>
+      <key>ActionParameters</key>
       <dict>
         <key>COMMAND_STRING</key><string>{script}</string>
         <key>CheckedForUserDefaultShell</key><true/>
@@ -849,6 +849,10 @@ mod tests {
                 .document_wflow
                 .contains("args+=(--path &quot;$path&quot;)"));
             assert!(workflow.document_wflow.contains("&quot;${args[@]}&quot;"));
+            assert!(workflow
+                .document_wflow
+                .contains("<key>ActionParameters</key>"));
+            assert!(!workflow.document_wflow.contains("<key>parameters</key>"));
         }
     }
 
